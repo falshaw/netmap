@@ -1,0 +1,191 @@
+# =============================================================================
+# NetMap - Network Diagram Generator
+# =============================================================================
+# Copy .env.example to .env and set your passwords before starting
+# API uses host networking for scanner access to real network devices
+# =============================================================================
+
+services:
+  # Frontend - React + Vite (nginx)
+  frontend:
+    container_name: netmap-frontend
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # No cap_add: nginx runs as USER nginx (see frontend/Dockerfile), so
+    # CHOWN/SETGID/SETUID are not needed.
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=50m,uid=101,gid=101
+      - /var/run:size=10m,uid=101,gid=101
+      - /etc/nginx/conf.d:size=10m,uid=101,gid=101
+      - /tmp:size=50m
+    restart: "no"
+    stop_grace_period: 30s
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:3021:3021"
+    environment:
+      - API_KEY=${API_KEY:?Set API_KEY in .env}
+      - API_HOST=${API_HOST:-172.44.0.12}
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - CLAUDE_BRIDGE_URL=${CLAUDE_BRIDGE_URL:-http://host.docker.internal:7777}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-opus}
+      - CLAUDE_BRIDGE_TOKEN=${CLAUDE_BRIDGE_TOKEN:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      netmap-network:
+        ipv4_address: 172.44.0.13
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3021/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+          pids: 200
+        reservations:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
+
+  # Backend - FastAPI + Scanner Engine
+  # Default: bridge networking (Windows/Mac). Linux: use docker-compose.host.yml for raw socket scanning.
+  api:
+    container_name: netmap-api
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # NOTE: Default bridge mode runs SCAN_MODE=limited (TCP connect scan only) and
+    # needs NO extra capabilities. NET_RAW + NET_ADMIN are added only in
+    # docker-compose.host.yml, where host networking enables raw-socket scanning.
+    read_only: true
+    tmpfs:
+      - /tmp:size=100m
+      - /home/appuser:size=50m
+    restart: "no"
+    stop_grace_period: 30s
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:8021:8021"
+    networks:
+      netmap-network:
+        ipv4_address: 172.44.0.12
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@172.44.0.10:5432/${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      - API_KEY=${API_KEY:?Set API_KEY in .env}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?Set ENCRYPTION_KEY in .env}
+      - SCAN_MODE=limited
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - CLAUDE_BRIDGE_URL=${CLAUDE_BRIDGE_URL:-http://host.docker.internal:7777}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-opus}
+      - CLAUDE_BRIDGE_TOKEN=${CLAUDE_BRIDGE_TOKEN:-}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8021/health')",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1"
+          pids: 200
+        reservations:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
+
+  # PostgreSQL Database
+  postgres:
+    container_name: netmap-postgres
+    restart: "no"
+    stop_grace_period: 30s
+    image: postgres:16.15-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    ports:
+      - "127.0.0.1:5450:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      - POSTGRES_DB=${POSTGRES_DB:?Set POSTGRES_DB in .env}
+    volumes:
+      - netmap-postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      netmap-network:
+        ipv4_address: 172.44.0.10
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+          pids: 200
+        reservations:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+        compress: "true"
+
+networks:
+  netmap-network:
+    name: netmap-network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.44.0.0/24
+
+volumes:
+  netmap-postgres-data:

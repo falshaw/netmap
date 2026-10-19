@@ -1,0 +1,20 @@
+fastapi==0.141.1
+# starlette pinned explicitly: fastapi declares no upper bound, so an unpinned build
+# can resolve below the floor. Floor raised 1.0.1 -> 1.3.1 on 2026-08-20:
+#   CVE-2026-54283 HIGH -> fixed 1.3.1   CVE-2026-48818 HIGH -> fixed 1.1.0
+#   CVE-2026-48817 MOD  -> fixed 1.1.0   CVE-2026-54282 LOW  -> fixed 1.3.0
+# (the older CVE-2026-48710 "BadHost" auth bypass is fixed at 1.0.1 and still covered).
+starlette>=1.3.1
+uvicorn[standard]==0.52.4
+sqlalchemy==2.0.52
+psycopg2-binary==2.9.12
+pydantic==2.13.4
+pydantic-settings==2.7.1
+python-nmap==0.7.1
+pysnmp==7.1.16
+scapy==2.7.0
+n2g==0.3.3
+slowapi==0.1.10
+cryptography==50.0.0
+pytest==9.1.1
+httpx==0.28.1

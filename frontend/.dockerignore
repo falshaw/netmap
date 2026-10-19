@@ -1,0 +1,13 @@
+.env
+.env.*
+.git
+.gitignore
+node_modules
+dist
+*.md
+docker-compose*.yml
+Dockerfile
+.vscode
+.claude
+tests
+__tests__

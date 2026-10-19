@@ -1,0 +1,8 @@
+# =============================================================================
+# Default override — no changes needed for Windows/Mac Docker Desktop
+# =============================================================================
+# Base docker-compose.yml uses bridge networking which works everywhere.
+#
+# For Linux with full scanning (raw sockets, host network access):
+#   docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
+# =============================================================================

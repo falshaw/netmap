@@ -1,0 +1,22 @@
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+out/
+.next/
+coverage/
+.coverage
+htmlcov/
+*.log
+*.tsbuildinfo
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
+*.db-shm
+*.db-wal
+venv/
+.venv/
+# scan exports can contain real network inventory
+*.drawio

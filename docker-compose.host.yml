@@ -1,0 +1,44 @@
+# =============================================================================
+# Linux override — enables host networking for full raw socket scanning
+# =============================================================================
+# Usage: docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
+#
+# ⚠️ EXPOSURE WARNING — read before using this override.
+# `network_mode: host` + `ports: !reset []` drops the 127.0.0.1 publish from the
+# base compose, and the image's CMD is `uvicorn --host 0.0.0.0 --port 8021`.
+# Net effect on Linux: **the scanner API listens on every host interface and is
+# reachable from the LAN**, protected only by the X-API-Key check. The base
+# bridge profile is unaffected (it publishes 127.0.0.1:8021 only), and this
+# override is inert on Windows/Docker Desktop, where host networking is not real.
+#
+# Do NOT "fix" this by binding uvicorn to 127.0.0.1 here: the `frontend` service
+# below stays on the bridge network and reaches the API via
+# `host.docker.internal`, so its traffic arrives from the Docker bridge address,
+# not loopback — a loopback-only bind refuses it and the UI breaks.
+#
+# If you need this override on a shared/untrusted network, gate port 8021 at the
+# host firewall (e.g. allow only the docker0 subnet + localhost) rather than
+# changing the bind address.
+# =============================================================================
+
+services:
+  api:
+    network_mode: host
+    networks: !reset []
+    ports: !reset []
+    # Raw-socket scanning (ARP, raw nmap) needs these caps. Only granted here in
+    # the host-networking path — the default bridge profile runs without them.
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@127.0.0.1:5450/${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      - API_KEY=${API_KEY:?Set API_KEY in .env}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?Set ENCRYPTION_KEY in .env}
+      - SCAN_MODE=full
+
+  frontend:
+    environment:
+      - API_HOST=host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

@@ -238,7 +238,11 @@ export default function TopologyCanvas({
           y: device.position_y ?? 0,
         },
         data: {
-          label: device.sys_name || device.hostname || device.ip_address,
+          // Short hostname (first DNS label) keeps node labels readable.
+          label:
+            device.sys_name ||
+            device.hostname?.split(".")[0] ||
+            device.ip_address,
           ip: device.ip_address,
           deviceType: device.device_type,
           vendor: device.vendor,

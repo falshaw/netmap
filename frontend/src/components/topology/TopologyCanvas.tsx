@@ -271,7 +271,7 @@ export default function TopologyCanvas({
         nodeTypes={nodeTypes}
         colorMode={theme}
         fitView
-        fitViewOptions={{ padding: 0.15, maxZoom: 1.1 }}
+        fitViewOptions={{ padding: 0.2, maxZoom: 1.1 }}
         minZoom={0.1}
         maxZoom={3}
         defaultEdgeOptions={{ type: "smoothstep" }}
@@ -290,6 +290,7 @@ export default function TopologyCanvas({
             return (palette as Record<string, string>)[t] ?? palette.unknown;
           }}
           className="hidden sm:block"
+          style={{ width: 150, height: 100 }}
         />
       </ReactFlow>
 

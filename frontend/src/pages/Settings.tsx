@@ -316,10 +316,15 @@ export default function Settings() {
               <span className="text-xs text-ink-45">Tests what is on screen, saved or not.</span>
             </div>
             {testResult && (
-              <div className={`alert ${testResult.ok ? "alert-ok" : "alert-error"}`} role="status">
+              <div
+                className={`alert ${!testResult.ok ? "alert-error" : testResult.model_available === false ? "alert-warn" : "alert-ok"}`}
+                role="status"
+              >
                 {testResult.ok ? <Check className="w-4 h-4 shrink-0" aria-hidden /> : <X className="w-4 h-4 shrink-0" aria-hidden />}
                 <span className="min-w-0 break-words">
-                  <b>{testResult.ok ? "Connected" : "Failed"}</b>
+                  <b>
+                    {!testResult.ok ? "Failed" : testResult.model_available === false ? "Reachable, model missing" : "Connected"}
+                  </b>
                   {testResult.model ? <> · <span className="font-mono">{testResult.model}</span></> : null}
                   <br />
                   {testResult.detail}

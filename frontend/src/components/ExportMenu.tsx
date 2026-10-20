@@ -82,7 +82,8 @@ export default function ExportMenu({ scanId, canvasRef }: ExportMenuProps) {
       const scale = Math.min(pw / img.width, ph / img.height);
       const w = img.width * scale;
       const h = img.height * scale;
-      doc.addImage(dataUrl, "PNG", (pw - w) / 2, (ph - h) / 2, w, h);
+      // FAST = deflate the image; without it the PDF was ~8 MB for a small map.
+      doc.addImage(dataUrl, "PNG", (pw - w) / 2, (ph - h) / 2, w, h, undefined, "FAST");
       doc.save(`netmap-scan-${scanId}.pdf`);
     });
 

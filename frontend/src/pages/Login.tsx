@@ -149,6 +149,8 @@ export default function Login() {
                 </p>
               )}
 
+              {/* Lets password managers file the key under a fixed name. */}
+              <input type="text" name="username" value="netmap" autoComplete="username" readOnly hidden />
               <div className="relative">
                 <KeyRound
                   className="pointer-events-none absolute top-1/2 left-[13px] h-4 w-4 -translate-y-1/2 text-ink-45"

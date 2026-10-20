@@ -53,7 +53,7 @@ def _decrypt_settings(settings: AppSettings) -> dict:
         "llm_provider": settings.llm_provider or "ollama",
         "llm_ollama_host": settings.llm_ollama_host or "",
         "llm_ollama_model": settings.llm_ollama_model or "",
-        "llm_claude_model": settings.llm_claude_model or "opus",
+        "llm_claude_model": settings.llm_claude_model or "sonnet",
         "notify_enabled": bool(settings.notify_enabled),
         "notify_webhook_url": decrypt_value(settings.notify_webhook_url) or "",
         "notify_on_scan_complete": bool(settings.notify_on_scan_complete),

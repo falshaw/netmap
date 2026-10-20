@@ -30,7 +30,7 @@ APP_NAME = "netmap"
 
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").lower()
 CLAUDE_BRIDGE_URL = os.getenv("CLAUDE_BRIDGE_URL", "http://host.docker.internal:7777")
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "opus").lower()
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "sonnet").lower()
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://host.docker.internal:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 

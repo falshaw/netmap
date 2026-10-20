@@ -79,7 +79,7 @@ export default function Settings() {
   const [llmProvider, setLlmProvider] = useState("ollama");
   const [llmOllamaHost, setLlmOllamaHost] = useState("");
   const [llmOllamaModel, setLlmOllamaModel] = useState("");
-  const [llmClaudeModel, setLlmClaudeModel] = useState("opus");
+  const [llmClaudeModel, setLlmClaudeModel] = useState("sonnet");
   const [testResult, setTestResult] = useState<LLMTestResult | null>(null);
 
   // Notification preferences state

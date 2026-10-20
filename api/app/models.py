@@ -151,7 +151,7 @@ class AppSettings(Base):
     llm_provider = Column(String(20), default="ollama")
     llm_ollama_host = Column(String(255), default="http://host.docker.internal:11434")
     llm_ollama_model = Column(String(100), default="qwen2.5:7b")
-    llm_claude_model = Column(String(20), default="opus")
+    llm_claude_model = Column(String(20), default="sonnet")
     # Notification preferences
     notify_enabled = Column(Boolean, default=False)
     notify_webhook_url = Column(String(500), default="")  # encrypted at rest
@@ -185,7 +185,7 @@ def ensure_app_settings_columns() -> None:
         ("llm_provider", "VARCHAR(20) DEFAULT 'ollama'"),
         ("llm_ollama_host", "VARCHAR(255) DEFAULT 'http://host.docker.internal:11434'"),
         ("llm_ollama_model", "VARCHAR(100) DEFAULT 'qwen2.5:7b'"),
-        ("llm_claude_model", "VARCHAR(20) DEFAULT 'opus'"),
+        ("llm_claude_model", "VARCHAR(20) DEFAULT 'sonnet'"),
         ("notify_enabled", f"BOOLEAN DEFAULT {false_lit}"),
         ("notify_webhook_url", "VARCHAR(500)"),
         ("notify_on_scan_complete", f"BOOLEAN DEFAULT {true_lit}"),

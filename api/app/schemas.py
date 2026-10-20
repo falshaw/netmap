@@ -156,7 +156,7 @@ class SettingsResponse(BaseModel):
     llm_provider: str = "ollama"
     llm_ollama_host: str = "http://host.docker.internal:11434"
     llm_ollama_model: str = "qwen2.5:7b"
-    llm_claude_model: str = "opus"
+    llm_claude_model: str = "sonnet"
     # Notification preferences
     notify_enabled: bool = False
     notify_webhook_url: str = ""

@@ -132,7 +132,9 @@ CREATE INDEX idx_networks_scan ON networks(scan_id);
 -- Application settings (singleton row)
 CREATE TABLE IF NOT EXISTS app_settings (
     id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-    snmp_community VARCHAR(100) DEFAULT 'public',
+    -- Encrypted at rest (Fernet), NULL until set on the Settings page.
+    -- Never seed a plaintext value here: the API would fail to decrypt it.
+    snmp_community VARCHAR(512),
     snmp_version VARCHAR(5) DEFAULT '2c',
     snmp_port INTEGER DEFAULT 161,
     snmp_timeout INTEGER DEFAULT 5,

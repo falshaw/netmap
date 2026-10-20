@@ -139,7 +139,8 @@ class AppSettings(Base):
     __tablename__ = "app_settings"
 
     id = Column(Integer, primary_key=True, default=1)
-    snmp_community = Column(String(100), default="public")
+    # Encrypted at rest (Fernet) - a plaintext default would fail to decrypt.
+    snmp_community = Column(String(512), default=None)
     snmp_version = Column(String(5), default="2c")
     snmp_port = Column(Integer, default=161)
     snmp_timeout = Column(Integer, default=5)

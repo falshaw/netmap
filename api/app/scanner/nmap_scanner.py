@@ -53,7 +53,8 @@ def _validate_ports(ports: str) -> str:
 
 async def scan_subnet(
     subnet: str,
-    ports: str = "22,23,53,80,135,139,161,443,445,3389,8080,8443,9100",
+    # Includes the database ports classify_device() looks for.
+    ports: str = "21,22,23,25,53,80,135,139,161,443,445,515,631,1433,3306,3389,5432,6379,8000,8080,8443,9100,27017",
     os_detection: bool = True,
 ) -> list[DiscoveredDevice]:
     """Scan a subnet with nmap for host discovery + port scan + optional OS detection.

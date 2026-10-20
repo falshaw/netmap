@@ -190,6 +190,16 @@ def check_connection() -> bool:
         return False
 
 
+def ollama_model_pulled(model: str, names: set[str]) -> bool:
+    """True when ``model`` is among the pulled Ollama models.
+
+    The tag must match: "qwen2.5:7b" is not available just because
+    "qwen2.5:14b" is pulled. A model given without a tag means ":latest".
+    """
+    want = model if ":" in model else f"{model}:latest"
+    return want in names
+
+
 def probe_provider(
     provider: str,
     *,
@@ -262,8 +272,7 @@ def probe_provider(
             "model_available": None,
         }
     names = {m.get("name", "") for m in res.json().get("models", [])}
-    base = model.split(":")[0]
-    model_available = any(n == model or n.split(":")[0] == base for n in names)
+    model_available = ollama_model_pulled(model, names)
     detail = "Ollama reachable" if model_available else f"Ollama reachable — model '{model}' not pulled"
     return {
         "ok": True,

@@ -10,7 +10,8 @@ server {
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self';" always;
 
-    # API proxy - injects API key server-side (API runs on host network)
+    # API proxy - injects the API key server-side. API_HOST is the compose
+    # service name (bridge default) or host.docker.internal (host-network override).
     location /api/ {
         proxy_pass http://${API_HOST}:8021/api/;
         proxy_set_header Host $http_host;

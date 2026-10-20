@@ -32,7 +32,7 @@ services:
       - NET_RAW
       - NET_ADMIN
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@127.0.0.1:5450/${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@127.0.0.1:${NETMAP_DB_PORT:-5450}/${POSTGRES_DB:?Set POSTGRES_DB in .env}
       - API_KEY=${API_KEY:?Set API_KEY in .env}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:?Set ENCRYPTION_KEY in .env}
       - SCAN_MODE=full

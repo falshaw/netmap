@@ -1009,6 +1009,10 @@
     /* colorMode="dark" paints its own near-black pane; keep the glass one. */
     --xy-background-color: transparent;
     --xy-background-color-default: transparent;
+    --xy-minimap-background-color: var(--surface);
+    --xy-minimap-background-color-default: var(--surface);
+    --xy-controls-button-background-color: var(--surface);
+    --xy-controls-button-color: var(--ink);
     --xy-edge-label-background-color: var(--surface);
     --xy-edge-label-color: var(--ink-65);
   }

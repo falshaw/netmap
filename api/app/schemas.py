@@ -10,8 +10,9 @@ class ScanRequest(BaseModel):
     target_ip: str
     subnets: list[str] = []
     snmp_community: Optional[str] = None
-    snmp_version: str = "2c"
-    snmp_port: int = Field(default=161, ge=1, le=65535)
+    # None = use the default saved in Settings (falls back to 2c / 161).
+    snmp_version: Optional[str] = None
+    snmp_port: Optional[int] = Field(default=None, ge=1, le=65535)
     scan_nmap: bool = True
     scan_arp: bool = True
     scan_snmp: bool = True
@@ -39,7 +40,9 @@ class ScanRequest(BaseModel):
 
     @field_validator("snmp_version")
     @classmethod
-    def validate_snmp_version(cls, v: str) -> str:
+    def validate_snmp_version(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
         if v not in ("1", "2c", "3"):
             raise ValueError("snmp_version must be 1, 2c, or 3")
         return v

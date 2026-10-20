@@ -17,6 +17,20 @@ from app.rate_limit import limiter
 router = APIRouter()
 
 
+def apply_settings_defaults(scan_req: ScanRequest, settings: AppSettings | None) -> None:
+    """Fill the SNMP fields a scan request left unset from the saved Settings.
+
+    Only unset (None) fields are filled: a value the caller sent explicitly,
+    including "2c" or port 161, always wins.
+    """
+    if scan_req.snmp_community is None and settings is not None:
+        scan_req.snmp_community = decrypt_value(settings.snmp_community)
+    if scan_req.snmp_version is None:
+        scan_req.snmp_version = (settings.snmp_version if settings else None) or "2c"
+    if scan_req.snmp_port is None:
+        scan_req.snmp_port = (settings.snmp_port if settings else None) or 161
+
+
 @router.post("", response_model=ScanResponse, status_code=201)
 @limiter.limit("5/minute")
 async def create_scan(
@@ -25,13 +39,8 @@ async def create_scan(
     db: Session = Depends(get_db),
 ):
     """Start a new network scan. Falls back to AppSettings defaults."""
-    # Load defaults from settings if not specified in request
     settings = db.query(AppSettings).filter(AppSettings.id == 1).first()
-    if settings:
-        if scan_req.snmp_community is None:
-            scan_req.snmp_community = decrypt_value(settings.snmp_community)
-        if scan_req.snmp_version == "2c" and settings.snmp_version != "2c":
-            scan_req.snmp_version = settings.snmp_version
+    apply_settings_defaults(scan_req, settings)
 
     scan = Scan(
         target_ip=scan_req.target_ip,

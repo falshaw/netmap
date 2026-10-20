@@ -42,7 +42,7 @@ def _decrypt_settings(settings: AppSettings) -> dict:
     """Return settings dict with sensitive fields decrypted."""
     data = {
         "id": settings.id,
-        "snmp_community": decrypt_value(settings.snmp_community),
+        "snmp_community": decrypt_value(settings.snmp_community) or "",
         "snmp_version": settings.snmp_version,
         "snmp_port": settings.snmp_port,
         "snmp_timeout": settings.snmp_timeout,

@@ -30,3 +30,15 @@ def test_model_default_is_none():
     col = AppSettings.__table__.c.snmp_community
     assert col.default is None or col.default.arg is None
     assert col.type.length >= 256
+
+
+def test_fresh_settings_row_serialises():
+    """GET /api/settings on a fresh row (community NULL) must not 500."""
+    from app.routes.settings import _decrypt_settings
+    from app.schemas import SettingsResponse
+
+    row = AppSettings(id=1, snmp_version="2c", snmp_port=161, snmp_timeout=5, snmp_retries=2,
+                      default_scan_nmap=True, default_scan_arp=True, default_scan_snmp=True)
+    data = _decrypt_settings(row)
+    assert data["snmp_community"] == ""
+    SettingsResponse(**data)

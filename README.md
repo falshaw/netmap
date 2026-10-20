@@ -78,12 +78,14 @@ docker network inspect netmap_netmap --format "{{range .IPAM.Config}}{{.Subnet}}
 # with -p <name> the network is called <name>_netmap
 ```
 
-Then on the **Scan** page enter the gateway as the target IP and the subnet under subnets, untick SNMP and ARP, and start the scan. The same through the API:
+Docker usually hands out a /16 (65,534 addresses), which takes a long time to sweep. Containers get the lowest addresses, so scan just the first /28 of it: for `172.20.0.0/16` that is `172.20.0.0/28`.
+
+Then on the **Scan** page enter the gateway as the target IP and the /28 under subnets, untick SNMP and ARP, and start the scan. The same through the API:
 
 ```bash
 curl -s -X POST http://127.0.0.1:8021/api/scans \
   -H "X-API-Key: <your API_KEY>" -H "Content-Type: application/json" \
-  -d '{"target_ip": "<gateway>", "subnets": ["<subnet>"], "scan_snmp": false, "scan_arp": false}'
+  -d '{"target_ip": "<gateway>", "subnets": ["<first /28>"], "scan_snmp": false, "scan_arp": false}'
 ```
 
 The scan should report one device per running container plus the network gateway, then show them in **Topology**.

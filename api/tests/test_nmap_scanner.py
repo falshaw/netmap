@@ -32,8 +32,11 @@ class TestClassifyDevice:
     def test_os_override_router(self):
         assert classify_device([22, 161], os_family="Cisco IOS 15.2") == "router"
 
-    def test_unknown(self):
-        assert classify_device([]) == "unknown"
+    def test_live_host_nothing_open_is_endpoint(self):
+        assert classify_device([]) == "endpoint"
+
+    def test_live_host_other_open_port_is_server(self):
+        assert classify_device([53]) == "server"
 
     def test_server_redis(self):
         assert classify_device([6379]) == "server"

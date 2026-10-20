@@ -73,76 +73,125 @@ async def scan_subnet(
     return await loop.run_in_executor(None, _scan_sync, subnet, ports, os_detection)
 
 
-def _scan_sync(subnet: str, ports: str, os_detection: bool) -> list[DiscoveredDevice]:
-    """Synchronous nmap scan (runs in thread pool)."""
-    scanner = nmap.PortScanner()
-    devices = []
+def _nmap_arguments(ports: str, os_detection: bool, scan_mode: str) -> str:
+    """Build the nmap argument string for the given scan mode.
 
-    scan_mode = os.getenv("SCAN_MODE", "full")
+    Host discovery is never disabled (no ``-Pn``): with ``-Pn`` nmap reports every
+    address in the range as "up", which turned each IP of a subnet into a device.
+
+    * limited (bridge networking, no raw sockets): ``--unprivileged`` TCP connect
+      scan. Host discovery uses TCP connect probes to the scanned ports - a SYN-ACK
+      *or* a RST proves the host is alive, a dead address times out or is
+      unreachable and is dropped.
+    * full (raw sockets): SYN scan with nmap's default discovery (ARP ping on the
+      local segment, ICMP/TCP probes elsewhere), plus optional OS detection.
+    """
     if scan_mode == "limited":
-        # TCP connect scan — no raw sockets needed (Windows/Mac Docker)
-        args = ["-sT", "-Pn", "-sV", "-T4", "-p", ports]
-        logger.info("Scan mode: limited (TCP connect, no OS detection)")
+        args = ["--unprivileged", "-sT", f"-PS{ports}", "-sV", "-T4", "-p", ports]
     else:
         args = ["-sS", "-sV", "-T4", "-p", ports]
         if os_detection:
             args.append("-O")
+    return " ".join(args)
 
+
+def _scan_sync(subnet: str, ports: str, os_detection: bool) -> list[DiscoveredDevice]:
+    """Synchronous nmap scan (runs in thread pool)."""
+    scanner = nmap.PortScanner()
+
+    scan_mode = os.getenv("SCAN_MODE", "full")
+    arguments = _nmap_arguments(ports, os_detection, scan_mode)
     try:
-        arguments = " ".join(args)
-        logger.info("nmap scan: %s %s", subnet, arguments)
+        logger.info("nmap scan (%s mode): %s %s", scan_mode, subnet, arguments)
         scanner.scan(hosts=subnet, arguments=arguments)
     except nmap.PortScannerError as e:
         logger.error("nmap scan failed: %s", e)
-        return devices
+        return []
 
-    for host in scanner.all_hosts():
-        if scanner[host].state() != "up":
+    hosts = {host: scanner[host] for host in scanner.all_hosts()}
+    devices = parse_nmap_hosts(hosts, subnet)
+    logger.info("nmap found %d live hosts in %s", len(devices), subnet)
+    return devices
+
+
+def is_host_address(ip: str, subnet: str) -> bool:
+    """True when ``ip`` is a usable host address of ``subnet``.
+
+    Network and broadcast addresses are never devices. /31 and /32 have no
+    network/broadcast address (RFC 3021), so every address there is a host.
+    """
+    try:
+        addr = ipaddress.ip_address(ip)
+        net = ipaddress.ip_network(subnet, strict=False)
+    except ValueError:
+        return False
+    if addr not in net:
+        return False
+    if net.version == 4 and net.prefixlen >= 31:
+        return True
+    return addr != net.network_address and addr != net.broadcast_address
+
+
+def parse_nmap_hosts(hosts: dict, subnet: str) -> list[DiscoveredDevice]:
+    """Turn nmap per-host results into devices - live, responding hosts only.
+
+    A host is skipped when nmap did not see it up, when its "up" state was only
+    assumed (``reason == "user-set"``, i.e. ``-Pn``) and no port answered, or when
+    it is the network or broadcast address of the scanned subnet.
+    """
+    devices: list[DiscoveredDevice] = []
+
+    for host, data in hosts.items():
+        status = data.get("status", {}) or {}
+        if status.get("state") != "up":
+            continue
+        if not is_host_address(host, subnet):
             continue
 
-        hostnames = scanner[host].hostnames()
-        hostname = hostnames[0]["name"] if hostnames and hostnames[0]["name"] else None
+        # Ports that answered at all (open or closed) prove the host exists.
+        open_ports: list[int] = []
+        answered = False
+        for proto in ("tcp", "udp"):
+            for port_num, port_data in (data.get(proto) or {}).items():
+                state = port_data.get("state")
+                if state == "open":
+                    open_ports.append(int(port_num))
+                if state in ("open", "closed"):
+                    answered = True
 
-        # OS detection results
+        if status.get("reason") == "user-set" and not answered:
+            continue
+
+        hostnames = data.get("hostnames") or []
+        hostname = hostnames[0].get("name") if hostnames and hostnames[0].get("name") else None
+
         os_family = None
         os_version = None
-        if "osmatch" in scanner[host] and scanner[host]["osmatch"]:
-            best_match = scanner[host]["osmatch"][0]
+        osmatch = data.get("osmatch") or []
+        if osmatch:
+            best_match = osmatch[0]
             os_family = best_match.get("name", "")
-            if "osclass" in best_match and best_match["osclass"]:
-                os_class = best_match["osclass"][0]
-                os_family = os_class.get("osfamily", os_family)
-                os_version = os_class.get("osgen", "")
+            osclass = best_match.get("osclass") or []
+            if osclass:
+                os_family = osclass[0].get("osfamily", os_family)
+                os_version = osclass[0].get("osgen", "")
 
-        # Get open ports for classification
-        open_ports = []
-        for proto in ["tcp", "udp"]:
-            if proto in scanner[host]:
-                for port_num, port_data in scanner[host][proto].items():
-                    if port_data.get("state") == "open":
-                        open_ports.append(port_num)
-
-        # MAC address (only available from same subnet)
-        mac = None
+        # MAC address (only available from the same L2 segment)
+        mac = (data.get("addresses") or {}).get("mac")
         vendor = None
-        if "mac" in scanner[host].get("addresses", {}):
-            mac = scanner[host]["addresses"]["mac"]
-        if "vendor" in scanner[host] and mac and mac in scanner[host]["vendor"]:
-            vendor = scanner[host]["vendor"][mac]
-
-        device_type = classify_device(open_ports, os_family)
+        if mac and mac in (data.get("vendor") or {}):
+            vendor = data["vendor"][mac]
 
         devices.append(DiscoveredDevice(
             ip_address=host,
             hostname=hostname,
             mac_address=mac,
             vendor=vendor,
-            device_type=device_type,
+            device_type=classify_device(open_ports, os_family),
             os_family=os_family,
             os_version=os_version,
         ))
 
-    logger.info("nmap found %d hosts in %s", len(devices), subnet)
     return devices
 
 
@@ -186,7 +235,11 @@ def classify_device(open_ports: list[int], os_family: Optional[str] = None) -> s
         if any(kw in lower for kw in ["embedded", "freebsd", "openbsd"]):
             return "router"
 
-    return "unknown"
+    # A live host that answered on other ports is most likely offering a service;
+    # one with nothing open is most likely a client.
+    if open_ports:
+        return "server"
+    return "endpoint"
 
 
 def mac_vendor_lookup(mac: str) -> Optional[str]:

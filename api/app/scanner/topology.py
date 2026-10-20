@@ -27,6 +27,7 @@ def build_topology(
     routes: list[DiscoveredRoute],
     vlans: list[DiscoveredVlan],
     target_ip: str,
+    subnets: Optional[list[str]] = None,
 ) -> tuple[list[DiscoveredLink], list[DiscoveredNetwork]]:
     """Build topology by inferring links from multiple data sources.
 
@@ -35,6 +36,11 @@ def build_topology(
     2. ARP — devices on same L2 segment
     3. Routing — next-hop relationships
     4. Subnet — devices sharing an IP subnet
+
+    ``subnets`` are the subnets that were scanned. Each one that contains at
+    least one discovered device becomes a network (a subnet is a network node,
+    never a device); devices without SNMP interface data are grouped into the
+    scanned subnet that contains them instead of a guessed /24.
 
     Returns (links, networks).
     """
@@ -111,9 +117,10 @@ def build_topology(
             _add_link(target_ip, route.next_hop, "routing")
 
     # 5. Subnet inference — group devices by subnet, link to hub
-    subnet_groups = _group_by_subnet(devices, interfaces)
+    subnet_groups = _group_by_subnet(devices, interfaces, subnets)
+    scanned = {str(n) for n in _parse_networks(subnets)}
     for subnet_str, members in subnet_groups.items():
-        if len(members) < 2:
+        if len(members) < 2 and subnet_str not in scanned:
             continue
 
         # Find hub: prefer firewall/router, then target_ip, then first device
@@ -150,7 +157,9 @@ def build_topology(
                 prefix_length=net.prefixlen,
                 vlan_id=vlan_id,
                 vlan_name=vlan_name,
-                gateway_ip=hub_ip,
+                # Only a routing device is reported as the subnet's gateway;
+                # a plain host used as the link hub is not.
+                gateway_ip=hub_ip if devices[hub_ip].device_type in ("firewall", "router") else None,
                 device_count=len(members),
             ))
         except ValueError:
@@ -177,9 +186,13 @@ def build_topology(
 def _group_by_subnet(
     devices: dict[str, DiscoveredDevice],
     interfaces: dict[str, list[DiscoveredInterface]],
+    subnets: Optional[list[str]] = None,
 ) -> dict[str, list[str]]:
-    """Group device IPs by their subnet (from interface data)."""
+    """Group device IPs by their subnet (from interface data, then scanned subnets)."""
     subnet_groups: dict[str, list[str]] = {}
+    scanned = _parse_networks(subnets)
+    # Most specific scanned subnet wins when they overlap.
+    scanned.sort(key=lambda n: n.prefixlen, reverse=True)
 
     for ip, ifaces in interfaces.items():
         for iface in ifaces:
@@ -196,12 +209,16 @@ def _group_by_subnet(
             except ValueError:
                 continue
 
-    # Also group devices without interface data by /24
+    # Devices without interface data: the scanned subnet that contains them,
+    # falling back to their /24.
     for ip in devices:
         if ip in interfaces:
             continue
         try:
-            net = ipaddress.ip_network(f"{ip}/24", strict=False)
+            addr = ipaddress.ip_address(ip)
+            net = next((n for n in scanned if addr in n), None)
+            if net is None:
+                net = ipaddress.ip_network(f"{ip}/24", strict=False)
             key = str(net)
             subnet_groups.setdefault(key, [])
             if ip not in subnet_groups[key]:
@@ -210,3 +227,14 @@ def _group_by_subnet(
             continue
 
     return subnet_groups
+
+
+def _parse_networks(subnets: Optional[list[str]]) -> list:
+    """Parse CIDR strings, silently skipping invalid ones."""
+    nets = []
+    for s in subnets or []:
+        try:
+            nets.append(ipaddress.ip_network(s, strict=False))
+        except ValueError:
+            continue
+    return nets

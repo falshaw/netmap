@@ -1,7 +1,10 @@
 """Scan orchestrator — coordinates the full discovery pipeline"""
 
+import ipaddress
 import logging
 import os
+import socket
+import struct
 from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy.orm import Session
@@ -19,7 +22,7 @@ from app.scanner.snmp import (
     snmp_get_vlans,
     snmp_get_routes,
 )
-from app.scanner.nmap_scanner import scan_subnet, mac_vendor_lookup
+from app.scanner.nmap_scanner import scan_subnet, mac_vendor_lookup, is_host_address
 from app.scanner.arp_scanner import arp_scan
 from app.scanner.topology import build_topology
 from app.scanner.models import DiscoveredDevice, DiscoveredInterface
@@ -144,6 +147,9 @@ async def run_scan(
             for subnet in subnets:
                 arp_hosts = await arp_scan(subnet)
                 for entry in arp_hosts:
+                    # Only real ARP replies from host addresses become devices.
+                    if not is_host_address(entry.ip_address, subnet):
+                        continue
                     if entry.ip_address not in devices:
                         vendor = mac_vendor_lookup(entry.mac_address)
                         devices[entry.ip_address] = DiscoveredDevice(
@@ -158,6 +164,7 @@ async def run_scan(
 
         # Phase 9: Build topology
         _update_phase(db, scan, "Building topology", 85)
+        infer_gateways(devices, subnets, routes, _local_default_gateway())
         links, networks = build_topology(
             devices=devices,
             interfaces=all_interfaces,
@@ -167,6 +174,7 @@ async def run_scan(
             routes=routes,
             vlans=vlans,
             target_ip=target_ip,
+            subnets=subnets,
         )
 
         # Phase 10: Persist to database
@@ -244,7 +252,7 @@ def _persist_results(
     interface_db_map: dict[str, dict[int, Interface]] = {}
 
     # Auto-layout positions
-    positions = _auto_layout(devices)
+    positions = _auto_layout(devices, networks)
 
     for ip, dev in devices.items():
         pos = positions.get(ip, (0, 0))
@@ -334,48 +342,149 @@ def _persist_results(
     db.flush()
 
 
-def _auto_layout(devices: dict[str, DiscoveredDevice]) -> dict[str, tuple[float, float]]:
-    """Auto-layout devices in a hierarchical tree.
+def _local_default_gateway(route_file: str = "/proc/net/route") -> Optional[str]:
+    """Return this host's IPv4 default gateway from the kernel routing table.
 
-    Layer order: firewall → router → switch → wireless_ap → server → endpoint/printer/unknown
-    Within each layer, devices are spread horizontally centered on x=500.
+    Linux only (the API container); returns None anywhere else.
     """
-    positions = {}
+    try:
+        with open(route_file, encoding="ascii") as fh:
+            next(fh)  # header
+            for line in fh:
+                fields = line.split()
+                if len(fields) < 3 or fields[1] != "00000000":
+                    continue
+                return socket.inet_ntoa(struct.pack("<L", int(fields[2], 16)))
+    except (OSError, ValueError, StopIteration):
+        return None
+    return None
 
-    # Assign layers with priority ordering
-    layer_order = ["firewall", "router", "switch", "wireless_ap", "server", "endpoint", "printer", "unknown"]
-    layer_y = {
-        "firewall": 50,
-        "router": 250,
-        "switch": 450,
-        "wireless_ap": 550,
-        "server": 650,
-        "endpoint": 850,
-        "printer": 850,
-        "unknown": 750,
-    }
 
-    layers: dict[str, list[str]] = {k: [] for k in layer_order}
+def infer_gateways(
+    devices: dict[str, DiscoveredDevice],
+    subnets: list[str],
+    routes: list,
+    local_gateway: Optional[str] = None,
+) -> dict[str, str]:
+    """Mark the gateway of each scanned subnet as a router.
 
-    for ip, dev in devices.items():
-        layer = dev.device_type if dev.device_type in layers else "unknown"
-        layers[layer].append(ip)
+    Evidence, strongest first: this scanner's own default gateway, a default
+    route learned over SNMP, then the subnet's first host address (the common
+    convention). Only a live, discovered device is ever marked, and only when no
+    better classification exists. Returns {subnet: gateway_ip}.
+    """
+    candidates: list[str] = []
+    if local_gateway:
+        candidates.append(local_gateway)
+    for route in routes or []:
+        if getattr(route, "destination", None) == "0.0.0.0" and getattr(route, "next_hop", None):
+            candidates.append(route.next_hop)
 
-    # Sort IPs within each layer for consistent ordering
-    for layer_name in layers:
-        layers[layer_name].sort()
-
-    center_x = 500
-    h_spacing = 280
-
-    for layer_name in layer_order:
-        ips = layers[layer_name]
-        if not ips:
+    found: dict[str, str] = {}
+    for subnet in subnets or []:
+        try:
+            net = ipaddress.ip_network(subnet, strict=False)
+        except ValueError:
             continue
-        y = layer_y[layer_name]
-        total = len(ips)
-        start_x = center_x - ((total - 1) * h_spacing) / 2
-        for i, ip in enumerate(ips):
-            positions[ip] = (start_x + i * h_spacing, y)
+        gw = next(
+            (ip for ip in candidates if ip in devices and ipaddress.ip_address(ip) in net),
+            None,
+        )
+        # A confirmed gateway that also serves something (e.g. a web UI) is still
+        # the router; the first-address convention only relabels unclassified hosts.
+        relabel = ("unknown", "endpoint", "server")
+        if gw is None and net.num_addresses > 2:
+            first = str(net.network_address + 1)
+            if first in devices:
+                gw = first
+                relabel = ("unknown", "endpoint")
+        if gw is None:
+            continue
+        found[str(net)] = gw
+        if devices[gw].device_type in relabel:
+            devices[gw].device_type = "router"
+    return found
+
+
+# Layout geometry (canvas units; a device node is ~170 x 110)
+_COL_W = 220
+_ROW_H = 160
+_MAX_COLS = 5
+_GROUP_GAP = 160
+_NODE_W = 170
+_GATEWAY_Y = 0
+_HOSTS_Y = 300
+
+
+def _ip_key(ip: str):
+    try:
+        return (0, int(ipaddress.ip_address(ip)))
+    except ValueError:
+        return (1, ip)
+
+
+def _auto_layout(
+    devices: dict[str, DiscoveredDevice],
+    networks: Optional[list] = None,
+) -> dict[str, tuple[float, float]]:
+    """Subnet-grouped layout.
+
+    Each network gets its own column block: the gateway on top, the subnet
+    (drawn by the UI as a network node) below it, and the hosts in a grid of at
+    most ``_MAX_COLS`` columns underneath. Blocks sit side by side. Devices that
+    belong to no network are placed in a grid below, ordered by device type.
+    """
+    positions: dict[str, tuple[float, float]] = {}
+    x_cursor = 0.0
+    max_y = 0.0
+
+    for net in sorted(networks or [], key=lambda n: _ip_key(n.network_address)):
+        try:
+            cidr = ipaddress.ip_network(f"{net.network_address}/{net.prefix_length}", strict=False)
+        except ValueError:
+            continue
+        members = [
+            ip for ip in devices
+            if ip not in positions and _in_network(ip, cidr)
+        ]
+        if not members:
+            continue
+        gw = net.gateway_ip if net.gateway_ip in members else None
+        hosts = sorted((ip for ip in members if ip != gw), key=_ip_key)
+
+        cols = min(_MAX_COLS, max(1, len(hosts)))
+        width = cols * _COL_W
+        center = x_cursor + width / 2
+        if gw:
+            positions[gw] = (center - _NODE_W / 2, _GATEWAY_Y)
+        for i, ip in enumerate(hosts):
+            row, col = divmod(i, cols)
+            in_row = min(cols, len(hosts) - row * cols)
+            row_left = center - in_row * _COL_W / 2
+            y = _HOSTS_Y + row * _ROW_H
+            positions[ip] = (row_left + col * _COL_W + (_COL_W - _NODE_W) / 2, y)
+            max_y = max(max_y, y)
+        x_cursor += width + _GROUP_GAP
+
+    # Anything not in a network: grid below, infrastructure first.
+    order = ["firewall", "router", "switch", "wireless_ap", "server", "endpoint", "printer", "unknown"]
+    rest = sorted(
+        (ip for ip in devices if ip not in positions),
+        key=lambda ip: (
+            order.index(devices[ip].device_type) if devices[ip].device_type in order else len(order),
+            _ip_key(ip),
+        ),
+    )
+    base_y = (max_y + _ROW_H * 2) if positions else 0
+    for i, ip in enumerate(rest):
+        row, col = divmod(i, _MAX_COLS)
+        positions[ip] = (col * _COL_W, base_y + row * _ROW_H)
 
     return positions
+
+
+def _in_network(ip: str, net) -> bool:
+    try:
+        return ipaddress.ip_address(ip) in net
+    except ValueError:
+        return False

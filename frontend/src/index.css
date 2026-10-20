@@ -851,8 +851,9 @@
   .topo-prev svg {
     display: block;
     width: 100%;
-    min-width: 560px;
+    max-width: 100%;
     height: auto;
+    margin: 0 auto;
   }
   .topo-prev .lk {
     stroke: var(--ink-45);
@@ -1005,6 +1006,9 @@
   }
   .topo-canvas .react-flow {
     background: transparent;
+    /* colorMode="dark" paints its own near-black pane; keep the glass one. */
+    --xy-background-color: transparent;
+    --xy-background-color-default: transparent;
     --xy-edge-label-background-color: var(--surface);
     --xy-edge-label-color: var(--ink-65);
   }

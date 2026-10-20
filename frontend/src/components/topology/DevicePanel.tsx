@@ -75,7 +75,7 @@ export default function DevicePanel({ device, devices, links, onSelect, onClose 
       <div className="flex items-start justify-between gap-3 px-[18px] pt-4 pb-3 border-b border-line">
         <div className="min-w-0">
           <div className="eyebrow">Device</div>
-          <h2 className="font-mono !text-[16px] truncate">{displayName(device)}</h2>
+          <h2 className="font-mono !text-[16px] break-all">{displayName(device)}</h2>
           <div className="text-[13px] text-ink-65">
             {info.label} · <span className="font-mono">{device.ip_address}</span>
           </div>

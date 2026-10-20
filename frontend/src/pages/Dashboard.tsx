@@ -114,7 +114,7 @@ function DiscoveryRing({ topo }: { topo: TopologyData }) {
           { c: "#14b8a6", label: "SNMP", n: snmp, by: "v1 / v2c / v3" },
           { c: "var(--amber)", label: "MAC known", n: withMac, by: "L2" },
         ].map((r) => (
-          <div key={r.label} className="flex justify-between items-baseline text-xs text-ink-65">
+          <div key={r.label} className="flex justify-between items-baseline gap-3 text-xs text-ink-65">
             <span className="inline-flex items-start gap-1.5">
               <span className="mt-1 inline-block h-[7px] w-[7px] rounded-full" style={{ background: r.c }} aria-hidden />
               <span>
@@ -122,7 +122,7 @@ function DiscoveryRing({ topo }: { topo: TopologyData }) {
                 <b className="block text-[17px] text-ink">{r.n}</b>
               </span>
             </span>
-            <em className="not-italic text-[11.5px] font-semibold text-teal">{r.by}</em>
+            <em className="not-italic text-[11.5px] font-semibold text-teal shrink-0 text-right">{r.by}</em>
           </div>
         ))}
       </div>
@@ -131,6 +131,7 @@ function DiscoveryRing({ topo }: { topo: TopologyData }) {
 }
 
 /* ── Small topology preview from the real scan ───────────── */
+const PREVIEW_COL_W = 190;
 function TopologyPreview({ topo }: { topo: TopologyData }) {
   const layout = useMemo(() => {
     const member = assignNetworks(topo.devices, topo.networks);
@@ -138,8 +139,7 @@ function TopologyPreview({ topo }: { topo: TopologyData }) {
       .filter((n) => topo.devices.some((d) => member.get(d.id) === n))
       .sort((a, b) => compareIp(a.network_address, b.network_address))
       .slice(0, 4);
-    const W = 760;
-    const colW = W / Math.max(1, nets.length);
+    const colW = PREVIEW_COL_W;
     return nets.map((net, i) => {
       const cx = colW * i + colW / 2;
       const devs = topo.devices
@@ -154,12 +154,16 @@ function TopologyPreview({ topo }: { topo: TopologyData }) {
   if (layout.length === 0) {
     return <p className="text-[13px] text-ink-65">This scan has no subnets to draw.</p>;
   }
-  const nodeW = Math.min(150, 760 / layout.length - 20);
+  const W = layout.length * PREVIEW_COL_W;
+  const nodeW = PREVIEW_COL_W - 30;
   const label = (s: string) => (s.length > 17 ? `${s.slice(0, 16)}…` : s);
   const total = topo.devices.length;
 
   return (
-    <svg viewBox="0 0 760 290" role="img" aria-label={`Topology of scan ${topo.scan_id}: ${total} devices in ${topo.networks.length} subnets`}>
+    <svg
+      viewBox={`0 0 ${W} 290`}
+      style={{ minWidth: layout.length > 1 ? layout.length * 150 : undefined, maxWidth: W * 1.25 }}
+      role="img" aria-label={`Topology of scan ${topo.scan_id}: ${total} devices in ${topo.networks.length} subnets`}>
       {layout.map(({ net, cx, gw, hosts, more }) => (
         <g key={net.id}>
           {gw && <path className="lk" d={`M${cx} 48V90`} />}

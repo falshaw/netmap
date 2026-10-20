@@ -15,7 +15,7 @@ const features = [
     icon: ScanSearch,
     title: "Multi-Protocol Discovery",
     description:
-      "SNMP v2c/v3, nmap host detection, and ARP scanning to find every device on your network.",
+      "SNMP v2c/v3, nmap host discovery and ARP scanning find the live hosts on the subnets you choose.",
   },
   {
     icon: Network,
@@ -37,17 +37,18 @@ const features = [
   },
 ];
 
+// Facts about the tool, not usage numbers.
 const stats = [
-  { value: "10K+", label: "Devices Scanned" },
-  { value: "6", label: "Protocols" },
-  { value: "100%", label: "Automated" },
+  { value: "SNMP", label: "v2c / v3" },
+  { value: "nmap + ARP", label: "Host discovery" },
+  { value: "draw.io", label: "PNG / PDF export" },
 ];
 
 const benefits = [
   {
-    title: "Zero Configuration",
+    title: "Agentless",
     description:
-      "Auto-discover your network topology. No agents, no manual mapping required.",
+      "Nothing to install on the devices you scan. Give it subnets and, optionally, SNMP credentials.",
   },
   {
     title: "On-Premise Only",
@@ -57,12 +58,12 @@ const benefits = [
   {
     title: "Vendor Agnostic",
     description:
-      "Works with any network vendor — Cisco, Palo Alto, Fortinet, Juniper, and more.",
+      "Uses standard protocols (SNMP, CDP, LLDP), so it is not tied to one vendor.",
   },
   {
     title: "API-First Design",
     description:
-      "Full REST API for automation. Integrate scans into your CI/CD or monitoring pipeline.",
+      "Everything the UI does goes through a REST API with Swagger docs, so scans can be scripted.",
   },
 ];
 
@@ -218,8 +219,8 @@ export default function Landing() {
             <div className="cta-orb cta-orb-2" />
             <h2 className="cta-title">Ready to Map Your Network?</h2>
             <p className="cta-description">
-              Start scanning in minutes. No agents, no cloud dependencies. Just
-              plug in and discover.
+              Runs locally with Docker Compose. No agents, no cloud
+              dependencies.
             </p>
             <div className="cta-buttons">
               <Link to="/login" className="btn-landing-primary btn-large">

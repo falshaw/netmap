@@ -43,6 +43,9 @@ export const DEVICE_COLORS: Record<string, string> = {
   unknown: "#6b7280",
 };
 
+/** Fixed node width; the server-side layout spaces columns for it. */
+export const DEVICE_NODE_WIDTH = 170;
+
 const hexToRgba = (hex: string, a: number) => {
   const [r, g, b] = hex.match(/\w\w/g)!.map((x) => parseInt(x, 16));
   return `rgba(${r},${g},${b},${a})`;
@@ -54,8 +57,12 @@ function DeviceNode({ data }: { data: DeviceNodeData }) {
 
   return (
     <div
-      className="relative px-4 py-3 rounded-xl border-2 min-w-[160px] shadow-2xl transition-all duration-200 hover:scale-[1.03]"
-      style={{ borderColor: hexToRgba(color, 0.25), background: "#0a0520" }}
+      className="relative px-3 py-2.5 rounded-xl border-2 shadow-2xl transition-all duration-200 hover:scale-[1.03]"
+      style={{
+        width: DEVICE_NODE_WIDTH,
+        borderColor: hexToRgba(color, 0.45),
+        background: "#0a0520",
+      }}
     >
       <Handle
         type="target"
@@ -83,11 +90,11 @@ function DeviceNode({ data }: { data: DeviceNodeData }) {
           <Icon className="w-4 h-4" />
         </div>
         <div className="min-w-0">
-          <h3 className="text-xs font-bold text-white truncate max-w-[110px]">
+          <h3 className="text-sm font-bold text-white truncate max-w-[110px]">
             {data.label}
           </h3>
           <p
-            className="text-[8px] font-bold uppercase tracking-widest"
+            className="text-[10px] font-bold uppercase tracking-wider"
             style={{ color }}
           >
             {data.deviceType.replace("_", " ")}
@@ -96,12 +103,12 @@ function DeviceNode({ data }: { data: DeviceNodeData }) {
       </div>
 
       <div className="bg-black/30 rounded-lg px-2 py-1 mb-1.5">
-        <code className="text-[9px] text-[var(--text-secondary)] font-mono">
+        <code className="text-[11px] text-[var(--text-secondary)] font-mono">
           {data.ip}
         </code>
       </div>
 
-      <div className="flex gap-1.5 text-[8px]">
+      <div className="flex gap-1.5 text-[10px]">
         {data.vendor && (
           <span className="px-1.5 py-0.5 bg-white/5 text-[var(--text-muted)] rounded truncate max-w-[80px]">
             {data.vendor}

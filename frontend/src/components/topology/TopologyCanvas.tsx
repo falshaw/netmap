@@ -13,12 +13,50 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import DeviceNode from "./DeviceNode";
+import DeviceNode, { DEVICE_NODE_WIDTH } from "./DeviceNode";
+import NetworkNode, { NETWORK_NODE_WIDTH } from "./NetworkNode";
 import DevicePanel from "./DevicePanel";
-import type { TopologyData, DeviceData } from "../../services/api";
+import type {
+  TopologyData,
+  DeviceData,
+  NetworkData,
+} from "../../services/api";
 import { api } from "../../services/api";
 
-const nodeTypes = { device: DeviceNode };
+const nodeTypes = { device: DeviceNode, network: NetworkNode };
+
+function ipToInt(ip: string): number | null {
+  const parts = ip.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255))
+    return null;
+  return ((parts[0] << 24) >>> 0) + (parts[1] << 16) + (parts[2] << 8) + parts[3];
+}
+
+function inNetwork(ip: string, net: NetworkData): boolean {
+  const addr = ipToInt(ip);
+  const base = ipToInt(net.network_address);
+  if (addr === null || base === null) return false;
+  const bits = net.prefix_length;
+  if (bits <= 0) return true;
+  const mask = bits >= 32 ? 0xffffffff : (~((1 << (32 - bits)) - 1)) >>> 0;
+  return ((addr & mask) >>> 0) === ((base & mask) >>> 0);
+}
+
+/** Device id -> the most specific network that contains it. */
+function assignNetworks(
+  devices: DeviceData[],
+  networks: NetworkData[],
+): Map<number, NetworkData> {
+  const byPrefix = [...networks].sort((a, b) => b.prefix_length - a.prefix_length);
+  const out = new Map<number, NetworkData>();
+  for (const d of devices) {
+    const net = byPrefix.find((n) => inNetwork(d.ip_address, n));
+    if (net) out.set(d.id, net);
+  }
+  return out;
+}
+
+const NETWORK_GAP_Y = 150;
 
 const STROKE_WIDTH_MAP: Record<string, number> = {
   "100": 1,
@@ -64,7 +102,7 @@ const DISCOVERY_LEGEND = [
   { method: "CDP/LLDP", color: "#06b6d4" },
   { method: "Routing", color: "#c9a227" },
   { method: "ARP", color: "#22c55e" },
-  { method: "Subnet", color: "#444444" },
+  { method: "Subnet", color: "#8b5cf6" },
 ];
 
 interface TopologyCanvasProps {
@@ -130,7 +168,67 @@ export default function TopologyCanvas({
     return ids;
   }, [data.devices, hasActiveSearch, matchesSearch]);
 
-  const initialNodes: Node[] = useMemo(
+  const membership = useMemo(
+    () => assignNetworks(data.devices, data.networks),
+    [data.devices, data.networks],
+  );
+
+  // Subnets are drawn as their own nodes: gateway above, hosts below.
+  const networkNodes: Node[] = useMemo(() => {
+    const out: Node[] = [];
+    for (const net of data.networks) {
+      const members = data.devices.filter((d) => membership.get(d.id) === net);
+      if (members.length === 0) continue;
+      const gateway = members.find((d) => d.ip_address === net.gateway_ip);
+      const hosts = members.filter((d) => d !== gateway);
+      const xs = (hosts.length ? hosts : members).map((d) => d.position_x ?? 0);
+      const centre = (Math.min(...xs) + Math.max(...xs)) / 2 + DEVICE_NODE_WIDTH / 2;
+      const y = gateway
+        ? (gateway.position_y ?? 0) + NETWORK_GAP_Y
+        : Math.min(...hosts.map((d) => d.position_y ?? 0)) - NETWORK_GAP_Y;
+      out.push({
+        id: `network-${net.id}`,
+        type: "network",
+        position: { x: (gateway ? (gateway.position_x ?? 0) + DEVICE_NODE_WIDTH / 2 : centre) - NETWORK_NODE_WIDTH / 2, y },
+        draggable: true,
+        selectable: false,
+        data: {
+          cidr: `${net.network_address}/${net.prefix_length}`,
+          vlan: net.vlan_name || (net.vlan_id != null ? `VLAN ${net.vlan_id}` : null),
+          deviceCount: members.length,
+        },
+      });
+    }
+    return out;
+  }, [data.networks, data.devices, membership]);
+
+  const networkEdges: Edge[] = useMemo(() => {
+    const shown = new Set(networkNodes.map((n) => n.id));
+    const out: Edge[] = [];
+    for (const net of data.networks) {
+      const nodeId = `network-${net.id}`;
+      if (!shown.has(nodeId)) continue;
+      for (const d of data.devices) {
+        if (membership.get(d.id) !== net) continue;
+        const isGateway = d.ip_address === net.gateway_ip;
+        const dimmed = matchedDeviceIds !== null && !matchedDeviceIds.has(d.id);
+        out.push({
+          id: `member-${net.id}-${d.id}`,
+          source: isGateway ? `device-${d.id}` : nodeId,
+          target: isGateway ? nodeId : `device-${d.id}`,
+          type: "smoothstep",
+          style: {
+            stroke: "#8b5cf6",
+            strokeWidth: isGateway ? 2.5 : 1.5,
+            opacity: dimmed ? 0.1 : 0.8,
+          },
+        });
+      }
+    }
+    return out;
+  }, [data.networks, data.devices, membership, networkNodes, matchedDeviceIds]);
+
+  const deviceNodes: Node[] = useMemo(
     () =>
       data.devices.map((device) => ({
         id: `device-${device.id}`,
@@ -158,9 +256,21 @@ export default function TopologyCanvas({
     [data.devices, matchedDeviceIds],
   );
 
-  const initialEdges: Edge[] = useMemo(
+  const initialNodes = useMemo(
+    () => [...networkNodes, ...deviceNodes],
+    [networkNodes, deviceNodes],
+  );
+
+  const linkEdges: Edge[] = useMemo(
     () =>
-      data.links.map((link) => {
+      data.links
+        // Subnet-inferred links are drawn through the network node instead.
+        .filter((link) => {
+          if (link.discovery_method !== "subnet") return true;
+          const a = membership.get(link.source_device_id);
+          return !(a && a === membership.get(link.target_device_id));
+        })
+        .map((link) => {
         const color = getEdgeColor(link.discovery_method);
         const dimmed =
           matchedDeviceIds !== null &&
@@ -189,7 +299,12 @@ export default function TopologyCanvas({
           labelStyle: { fill: color, fontSize: 10, fontWeight: 500 },
         };
       }),
-    [data.links, matchedDeviceIds],
+    [data.links, matchedDeviceIds, membership],
+  );
+
+  const initialEdges = useMemo(
+    () => [...networkEdges, ...linkEdges],
+    [networkEdges, linkEdges],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
@@ -206,7 +321,8 @@ export default function TopologyCanvas({
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_, node) => {
-      const deviceId = parseInt(node.id.replace("device-", ""));
+      if (!node.id.startsWith("device-")) return;
+      const deviceId = parseInt(node.id.replace("device-", ""), 10);
       const device = data.devices.find((d) => d.id === deviceId);
       if (device) setSelectedDevice(device);
     },
@@ -215,6 +331,7 @@ export default function TopologyCanvas({
 
   const onNodeDragStop: NodeMouseHandler = useCallback(
     (_, node) => {
+      if (!node.id.startsWith("device-")) return;
       const deviceId = parseInt(node.id.replace("device-", ""), 10);
       api
         .updatePositions(data.scan_id, [
@@ -291,8 +408,8 @@ export default function TopologyCanvas({
         onNodeDragStop={onNodeDragStop}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.3 }}
-        minZoom={0.2}
+        fitViewOptions={{ padding: 0.15, maxZoom: 1.25 }}
+        minZoom={0.1}
         maxZoom={3}
         defaultEdgeOptions={{ type: "smoothstep" }}
       >
@@ -305,6 +422,7 @@ export default function TopologyCanvas({
         <Controls showInteractive={false} />
         <MiniMap
           nodeColor={(node) => {
+            if (node.type === "network") return "#8b5cf6";
             const dt = (node.data as { deviceType?: string }).deviceType;
             if (dt === "firewall") return "#d4af37";
             if (dt === "router") return "#06b6d4";

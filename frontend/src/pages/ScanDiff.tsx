@@ -1,449 +1,177 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { Loader2, AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
 import {
-  ArrowLeft,
-  Loader2,
-  AlertCircle,
-  Plus,
-  Minus,
-  RefreshCw,
-  Shield,
-  Router,
-  Server,
-  Monitor,
-  HardDrive,
-  CircleDot,
-  ChevronDown,
-  ChevronRight,
-} from "lucide-react";
-import { api, type ScanDiffData, type DeviceChange } from "../services/api";
+  api,
+  errorMessage,
+  type ScanDiffData,
+  type DeviceChange,
+  type LinkChange,
+} from "../services/api";
+import { deviceType } from "../lib/devices";
 
-const card: React.CSSProperties = {
-  background: "rgba(255, 255, 255, 0.02)",
-  border: "1px solid rgba(255, 255, 255, 0.06)",
-  borderRadius: 14,
-  padding: 20,
-  backdropFilter: "blur(40px)",
-  WebkitBackdropFilter: "blur(40px)",
-  boxShadow:
-    "0 4px 6px rgba(0,0,0,0.15), 0 20px 50px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)",
-};
+const TONE = {
+  added: { badge: "b-teal", label: "added", sign: "+" },
+  removed: { badge: "b-red", label: "removed", sign: "−" },
+  changed: { badge: "b-amber", label: "changed", sign: "~" },
+} as const;
 
-const DEVICE_ICONS: Record<string, typeof Shield> = {
-  firewall: Shield,
-  router: Router,
-  switch: HardDrive,
-  server: Server,
-  endpoint: Monitor,
-  unknown: CircleDot,
-};
-
-const CHANGE_STYLES = {
-  added: {
-    color: "#22c55e",
-    bg: "rgba(34,197,94,0.08)",
-    border: "rgba(34,197,94,0.2)",
-    icon: Plus,
-  },
-  removed: {
-    color: "#ef4444",
-    bg: "rgba(239,68,68,0.08)",
-    border: "rgba(239,68,68,0.2)",
-    icon: Minus,
-  },
-  changed: {
-    color: "#f59e0b",
-    bg: "rgba(245,158,11,0.08)",
-    border: "rgba(245,158,11,0.2)",
-    icon: RefreshCw,
-  },
-};
-
-function DeviceEntry({ device }: { device: DeviceChange }) {
-  const style = CHANGE_STYLES[device.change_type];
-  const Icon = DEVICE_ICONS[device.device_type] || CircleDot;
-  const ChangeIcon = style.icon;
-
+function DeviceRow({ device }: { device: DeviceChange }) {
+  const tone = TONE[device.change_type];
+  const info = deviceType(device.device_type);
   return (
-    <div
-      className="flex items-center gap-3 px-3 py-2.5 rounded-lg"
-      style={{ background: style.bg, border: `1px solid ${style.border}` }}
-    >
-      <ChangeIcon
-        className="w-3.5 h-3.5 flex-shrink-0"
-        style={{ color: style.color }}
-      />
-      <Icon
-        className="w-4 h-4 flex-shrink-0"
-        style={{ color: "var(--text-secondary)" }}
-      />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-[13px] font-medium text-white">
-            {device.ip_address}
-          </span>
-          {device.hostname && (
-            <span
-              className="text-[11px]"
-              style={{ color: "var(--text-muted)" }}
-            >
-              ({device.hostname})
-            </span>
-          )}
+    <li className="flex items-start gap-3 px-4 py-3 border-b border-line-2 last:border-0">
+      <span className={`badge ${tone.badge} shrink-0 mt-0.5`}>{tone.label}</span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline gap-x-2">
+          <b className="font-mono font-medium text-[13px]">{device.ip_address}</b>
+          {device.hostname && <span className="text-xs text-ink-65 truncate">{device.hostname}</span>}
         </div>
-        <div className="flex items-center gap-2 mt-0.5">
-          <span
-            className="text-[10px] font-semibold uppercase"
-            style={{ color: style.color }}
-          >
-            {device.device_type}
-          </span>
-          {device.vendor && (
-            <span
-              className="text-[10px]"
-              style={{ color: "var(--text-faint)" }}
-            >
-              {device.vendor}
-            </span>
-          )}
+        <div className="text-xs text-ink-65">
+          <span style={{ color: info.color }} className="font-semibold">{info.label}</span>
+          {device.vendor ? ` · ${device.vendor}` : ""}
         </div>
         {device.changes && (
-          <div className="mt-1 space-y-0.5">
-            {Object.entries(device.changes).map(([field, change]) => (
-              <div
-                key={field}
-                className="text-[10px]"
-                style={{ color: "var(--text-muted)" }}
-              >
-                <span className="font-semibold">{field}:</span>{" "}
-                <span style={{ color: "#ef4444" }}>
-                  {change.from || "none"}
-                </span>
-                {" → "}
-                <span style={{ color: "#22c55e" }}>{change.to || "none"}</span>
-              </div>
+          <ul className="mt-1.5 grid gap-0.5">
+            {Object.entries(device.changes).map(([field, ch]) => (
+              <li key={field} className="text-xs font-mono">
+                <span className="text-ink-65">{field}:</span>{" "}
+                <span className="text-red">{ch.from || "none"}</span> →{" "}
+                <span className="text-teal">{ch.to || "none"}</span>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
       </div>
-    </div>
+    </li>
   );
 }
 
-function DiffSection({
-  title,
-  count,
-  color,
-  children,
-  defaultOpen = true,
-}: {
-  title: string;
-  count: number;
-  color: string;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-
-  if (count === 0) return null;
-
+function LinkRow({ link }: { link: LinkChange }) {
+  const tone = TONE[link.change_type];
   return (
-    <div style={card}>
+    <li className="flex items-center gap-3 px-4 py-2.5 border-b border-line-2 last:border-0">
+      <span className={`badge ${tone.badge} shrink-0`}>{tone.label}</span>
+      <span className="font-mono text-[12.5px] truncate">
+        {link.source_ip} ↔ {link.target_ip}
+      </span>
+      {link.discovery_method && (
+        <span className="ml-auto text-[11px] font-mono text-ink-45 uppercase">{link.discovery_method}</span>
+      )}
+    </li>
+  );
+}
+
+function Section({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
+  const [open, setOpen] = useState(true);
+  if (count === 0) return null;
+  return (
+    <section className="card overflow-hidden">
       <button
+        type="button"
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 w-full text-left"
+        aria-expanded={open}
+        className="flex items-center gap-2 w-full px-4 py-3 text-left cursor-pointer"
       >
-        {open ? (
-          <ChevronDown
-            className="w-4 h-4"
-            style={{ color: "var(--text-muted)" }}
-          />
-        ) : (
-          <ChevronRight
-            className="w-4 h-4"
-            style={{ color: "var(--text-muted)" }}
-          />
-        )}
-        <span className="text-[13px] font-semibold text-white">{title}</span>
-        <span
-          className="text-[11px] font-bold px-2 py-0.5 rounded-full"
-          style={{ color, background: `${color}20` }}
-        >
-          {count}
-        </span>
+        {open ? <ChevronDown className="w-4 h-4 text-ink-45" aria-hidden /> : <ChevronRight className="w-4 h-4 text-ink-45" aria-hidden />}
+        <h2>{title}</h2>
+        <span className="badge b-grey">{count}</span>
       </button>
-      {open && <div className="mt-3 space-y-2">{children}</div>}
-    </div>
+      {open && <ul className="border-t border-line">{children}</ul>}
+    </section>
   );
 }
 
 export default function ScanDiff() {
-  const { scanIdA, scanIdB } = useParams<{
-    scanIdA: string;
-    scanIdB: string;
-  }>();
+  const { scanIdA = "", scanIdB = "" } = useParams<{ scanIdA: string; scanIdB: string }>();
+  const a = parseInt(scanIdA, 10);
+  const b = parseInt(scanIdB, 10);
+  const valid = Number.isFinite(a) && Number.isFinite(b);
 
   const { data, isLoading, error } = useQuery<ScanDiffData>({
-    queryKey: ["scanDiff", scanIdA, scanIdB],
-    queryFn: () =>
-      api.compareScan(parseInt(scanIdA!, 10), parseInt(scanIdB!, 10)),
-    enabled:
-      !!scanIdA &&
-      !!scanIdB &&
-      Number.isFinite(parseInt(scanIdA!, 10)) &&
-      Number.isFinite(parseInt(scanIdB!, 10)),
+    queryKey: ["scanDiff", a, b],
+    queryFn: () => api.compareScan(a, b),
+    enabled: valid,
   });
 
-  if (isLoading) {
-    return (
-      <div className="flex flex-col items-center justify-center h-screen">
-        <Loader2
-          className="w-10 h-10 animate-spin mb-4"
-          style={{ color: "var(--accent-primary)" }}
-        />
-        <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-          Comparing scans...
-        </p>
+  const head = (
+    <div className="mb-5">
+      <div className="eyebrow">
+        <Link to="/history" className="hover:text-accent">History</Link> / Compare
       </div>
+      <h1>Scan #{scanIdA} vs #{scanIdB}</h1>
+    </div>
+  );
+
+  if (!valid || error) {
+    return (
+      <>
+        {head}
+        <div className="alert alert-error" role="alert">
+          <AlertCircle className="w-4 h-4 shrink-0" aria-hidden />
+          {valid ? errorMessage(error, "Could not compare these scans") : "Those are not scan numbers."}
+        </div>
+        <Link to="/history" className="btn btn-ghost btn-sm mt-4">Back to history</Link>
+      </>
     );
   }
 
-  if (error || !data) {
+  if (isLoading || !data) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen">
-        <AlertCircle
-          className="w-10 h-10 mb-4"
-          style={{ color: "var(--red)" }}
-        />
-        <p className="text-sm mb-4" style={{ color: "var(--red)" }}>
-          {(error as Error)?.message || "Failed to compare scans"}
-        </p>
-        <Link to="/history" className="btn-secondary">
-          Back to History
-        </Link>
-      </div>
+      <>
+        {head}
+        <div className="flex items-center gap-2 text-ink-65" aria-busy="true">
+          <Loader2 className="w-4 h-4 spin" aria-hidden /> Comparing scans…
+        </div>
+      </>
     );
   }
 
-  const totalChanges =
-    data.devices_added.length +
-    data.devices_removed.length +
-    data.devices_changed.length;
+  const deviceChanges = data.devices_added.length + data.devices_removed.length + data.devices_changed.length;
+  const links = [...data.links_added, ...data.links_removed, ...data.links_changed];
 
   return (
-    <div className="min-h-screen flex items-start justify-center p-6">
-      <div
-        className="w-full rounded-[20px] overflow-hidden"
-        style={{
-          maxWidth: 900,
-          border: "1px solid var(--accent-primary)",
-          boxShadow:
-            "0 0 60px rgba(6, 182, 212, 0.15), 0 25px 80px rgba(0, 0, 0, 0.5)",
-          background:
-            "linear-gradient(145deg, rgba(15,35,64,0.95), rgba(10,22,40,0.98))",
-        }}
-      >
-        {/* Toolbar */}
-        <div
-          className="flex items-center justify-between px-6 py-4 border-b"
-          style={{ borderColor: "var(--border-subtle)" }}
-        >
-          <div className="flex items-center gap-3">
-            <Link
-              to="/history"
-              className="p-1.5 rounded-lg transition-colors"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </Link>
-            <div>
-              <h1 className="text-sm font-bold text-white">
-                Scan #{data.scan_a_id} vs #{data.scan_b_id}
-              </h1>
-              <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-                {data.devices_added.length} added &middot;{" "}
-                {data.devices_removed.length} removed &middot;{" "}
-                {data.devices_changed.length} changed &middot;{" "}
-                {data.devices_unchanged} unchanged
-              </p>
-            </div>
+    <>
+      {head}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        {[
+          { label: "Added", n: data.devices_added.length, c: "var(--teal)" },
+          { label: "Removed", n: data.devices_removed.length, c: "var(--red)" },
+          { label: "Changed", n: data.devices_changed.length, c: "var(--amber)" },
+          { label: "Unchanged", n: data.devices_unchanged, c: "var(--ink-65)" },
+        ].map((s) => (
+          <div key={s.label} className="card p-4">
+            <div className="eyebrow">{s.label} devices</div>
+            <b className="block text-2xl mt-1" style={{ color: s.c }}>{s.n}</b>
           </div>
-
-          {totalChanges === 0 && (
-            <span
-              className="text-[11px] font-semibold px-3 py-1 rounded-full"
-              style={{
-                color: "#22c55e",
-                background: "rgba(34,197,94,0.12)",
-              }}
-            >
-              No Changes
-            </span>
-          )}
-        </div>
-
-        {/* Content */}
-        <div className="p-6 space-y-4">
-          {/* Summary cards */}
-          <div className="grid grid-cols-4 gap-3">
-            {[
-              {
-                label: "Added",
-                value: data.devices_added.length,
-                color: "#22c55e",
-              },
-              {
-                label: "Removed",
-                value: data.devices_removed.length,
-                color: "#ef4444",
-              },
-              {
-                label: "Changed",
-                value: data.devices_changed.length,
-                color: "#f59e0b",
-              },
-              {
-                label: "Unchanged",
-                value: data.devices_unchanged,
-                color: "var(--text-muted)",
-              },
-            ].map(({ label, value, color }) => (
-              <div
-                key={label}
-                className="text-center py-3 rounded-lg"
-                style={{
-                  background: "rgba(255,255,255,0.02)",
-                  border: "1px solid rgba(255,255,255,0.06)",
-                }}
-              >
-                <div className="text-2xl font-bold" style={{ color }}>
-                  {value}
-                </div>
-                <div
-                  className="text-[10px] mt-1"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  {label}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Device diffs */}
-          <DiffSection
-            title="Added Devices"
-            count={data.devices_added.length}
-            color="#22c55e"
-          >
-            {data.devices_added.map((d) => (
-              <DeviceEntry key={d.ip_address} device={d} />
-            ))}
-          </DiffSection>
-
-          <DiffSection
-            title="Removed Devices"
-            count={data.devices_removed.length}
-            color="#ef4444"
-          >
-            {data.devices_removed.map((d) => (
-              <DeviceEntry key={d.ip_address} device={d} />
-            ))}
-          </DiffSection>
-
-          <DiffSection
-            title="Changed Devices"
-            count={data.devices_changed.length}
-            color="#f59e0b"
-          >
-            {data.devices_changed.map((d) => (
-              <DeviceEntry key={d.ip_address} device={d} />
-            ))}
-          </DiffSection>
-
-          {/* Link diffs */}
-          {(data.links_added.length > 0 ||
-            data.links_removed.length > 0 ||
-            data.links_changed.length > 0) && (
-            <div style={card}>
-              <h3 className="text-[13px] font-semibold text-white mb-3">
-                Link Changes
-              </h3>
-              <div className="space-y-1.5">
-                {data.links_added.map((l, i) => (
-                  <div
-                    key={`la-${i}`}
-                    className="flex items-center gap-2 text-[11px] px-2 py-1.5 rounded"
-                    style={{ background: "rgba(34,197,94,0.06)" }}
-                  >
-                    <Plus className="w-3 h-3" style={{ color: "#22c55e" }} />
-                    <span className="text-white">
-                      {l.source_ip} &harr; {l.target_ip}
-                    </span>
-                    {l.discovery_method && (
-                      <span style={{ color: "var(--text-faint)" }}>
-                        ({l.discovery_method})
-                      </span>
-                    )}
-                  </div>
-                ))}
-                {data.links_removed.map((l, i) => (
-                  <div
-                    key={`lr-${i}`}
-                    className="flex items-center gap-2 text-[11px] px-2 py-1.5 rounded"
-                    style={{ background: "rgba(239,68,68,0.06)" }}
-                  >
-                    <Minus className="w-3 h-3" style={{ color: "#ef4444" }} />
-                    <span className="text-white">
-                      {l.source_ip} &harr; {l.target_ip}
-                    </span>
-                    {l.discovery_method && (
-                      <span style={{ color: "var(--text-faint)" }}>
-                        ({l.discovery_method})
-                      </span>
-                    )}
-                  </div>
-                ))}
-                {data.links_changed.map((l, i) => (
-                  <div
-                    key={`lc-${i}`}
-                    className="flex items-center gap-2 text-[11px] px-2 py-1.5 rounded"
-                    style={{ background: "rgba(245,158,11,0.06)" }}
-                  >
-                    <RefreshCw
-                      className="w-3 h-3"
-                      style={{ color: "#f59e0b" }}
-                    />
-                    <span className="text-white">
-                      {l.source_ip} &harr; {l.target_ip}
-                    </span>
-                    {l.discovery_method && (
-                      <span style={{ color: "var(--text-faint)" }}>
-                        ({l.discovery_method})
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Unchanged summary */}
-          {data.devices_unchanged > 0 && totalChanges > 0 && (
-            <div
-              className="text-center py-3 rounded-lg text-[12px]"
-              style={{
-                background: "rgba(255,255,255,0.01)",
-                border: "1px solid rgba(255,255,255,0.04)",
-                color: "var(--text-muted)",
-              }}
-            >
-              {data.devices_unchanged} unchanged devices &middot;{" "}
-              {data.links_unchanged} unchanged links
-            </div>
-          )}
-        </div>
+        ))}
       </div>
-    </div>
+
+      {deviceChanges === 0 && links.length === 0 ? (
+        <div className="alert alert-ok">
+          No changes: both scans found the same {data.devices_unchanged} devices and{" "}
+          {data.links_unchanged} links.
+        </div>
+      ) : (
+        <div className="grid gap-4">
+          <Section title="Added devices" count={data.devices_added.length}>
+            {data.devices_added.map((d) => <DeviceRow key={d.ip_address} device={d} />)}
+          </Section>
+          <Section title="Removed devices" count={data.devices_removed.length}>
+            {data.devices_removed.map((d) => <DeviceRow key={d.ip_address} device={d} />)}
+          </Section>
+          <Section title="Changed devices" count={data.devices_changed.length}>
+            {data.devices_changed.map((d) => <DeviceRow key={d.ip_address} device={d} />)}
+          </Section>
+          <Section title="Link changes" count={links.length}>
+            {links.map((l, i) => <LinkRow key={`${l.change_type}-${i}`} link={l} />)}
+          </Section>
+          <p className="text-xs text-ink-65">
+            {data.devices_unchanged} unchanged devices · {data.links_unchanged} unchanged links
+          </p>
+        </div>
+      )}
+    </>
   );
 }

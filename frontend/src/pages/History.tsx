@@ -1,314 +1,197 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  Network,
-  CheckCircle,
-  XCircle,
-  Loader2,
-  Clock,
-  ArrowRight,
-  ScanSearch,
-  Trash2,
-  GitCompareArrows,
-} from "lucide-react";
-import { api, type ScanResponse } from "../services/api";
-import { HistorySkeleton } from "../components/Skeleton";
-
-const card: React.CSSProperties = {
-  background: "rgba(255, 255, 255, 0.02)",
-  border: "1px solid rgba(255, 255, 255, 0.06)",
-  borderRadius: 14,
-  padding: 20,
-  backdropFilter: "blur(40px)",
-  WebkitBackdropFilter: "blur(40px)",
-  boxShadow:
-    "0 4px 6px rgba(0,0,0,0.15), 0 20px 50px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)",
-};
-
-function StatusBadge({ status }: { status: string }) {
-  switch (status) {
-    case "completed":
-      return (
-        <span className="badge badge-green">
-          <CheckCircle className="w-3 h-3" /> Complete
-        </span>
-      );
-    case "running":
-      return (
-        <span className="badge badge-cyan">
-          <Loader2 className="w-3 h-3 animate-spin" /> Running
-        </span>
-      );
-    case "failed":
-      return (
-        <span className="badge badge-red">
-          <XCircle className="w-3 h-3" /> Failed
-        </span>
-      );
-    default:
-      return (
-        <span className="badge badge-muted">
-          <Clock className="w-3 h-3" /> {status}
-        </span>
-      );
-  }
-}
-
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return "-";
-  const d = new Date(dateStr);
-  return d.toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+import { ScanSearch, Trash2, GitCompareArrows, Search, AlertCircle } from "lucide-react";
+import { api, errorMessage, type ScanResponse } from "../services/api";
+import { ListSkeleton } from "../components/Skeleton";
+import { ScanStatusIcon, ScanStatusPill } from "../components/ScanStatus";
+import { formatDateTime, formatDuration } from "../lib/devices";
 
 export default function History() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const { data: scans, isLoading } = useQuery<ScanResponse[]>({
-    queryKey: ["scans"],
-    queryFn: api.listScans,
-  });
-
+  const [query, setQuery] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
-  const [selectedForCompare, setSelectedForCompare] = useState<Set<number>>(
-    new Set(),
-  );
+  const [selected, setSelected] = useState<number[]>([]);
+
+  const { data: scans, isLoading, isError } = useQuery<ScanResponse[]>({
+    queryKey: ["scans", "all"],
+    queryFn: () => api.listScans(200),
+    refetchInterval: (q) =>
+      q.state.data?.some((s) => s.status === "running" || s.status === "pending") ? 3000 : false,
+  });
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => api.deleteScan(id),
-    onSuccess: () => {
+    onSuccess: (_, id) => {
+      setSelected((prev) => prev.filter((x) => x !== id));
       queryClient.invalidateQueries({ queryKey: ["scans"] });
-      setConfirmDeleteId(null);
-    },
-    onError: () => {
+      queryClient.invalidateQueries({ queryKey: ["topology", String(id)] });
       setConfirmDeleteId(null);
     },
   });
 
-  const toggleCompare = (id: number) => {
-    setSelectedForCompare((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else if (next.size < 2) {
-        next.add(id);
-      }
-      return next;
-    });
-  };
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!scans || !q) return scans ?? [];
+    return scans.filter(
+      (s) =>
+        String(s.id) === q.replace(/^#/, "") ||
+        s.target_ip.includes(q) ||
+        (s.subnets ?? []).some((n) => n.includes(q)) ||
+        s.status.includes(q),
+    );
+  }, [scans, query]);
 
-  const compareSelected = () => {
-    const ids = Array.from(selectedForCompare).sort((a, b) => a - b);
-    if (ids.length === 2) {
-      navigate(`/compare/${ids[0]}/${ids[1]}`);
-    }
+  const toggleCompare = (id: number) =>
+    setSelected((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : prev.length < 2 ? [...prev, id] : prev,
+    );
+
+  const compare = () => {
+    const [a, b] = [...selected].sort((x, y) => x - y);
+    navigate(`/compare/${a}/${b}`);
   };
 
   return (
-    <div style={{ padding: "24px 28px" }} className="grid gap-5">
-      {/* Header card */}
-      <div style={card}>
-        <div className="flex items-center justify-between">
-          <div>
-            <span
-              className="text-[13px] font-semibold uppercase tracking-[0.5px]"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              Scan History
-            </span>
-            <p className="text-sm mt-2" style={{ color: "var(--text-muted)" }}>
-              All previous network scans and their results
-            </p>
-          </div>
-          <div className="flex gap-2">
-            {selectedForCompare.size === 2 && (
-              <button onClick={compareSelected} className="btn-secondary !py-2">
-                <GitCompareArrows className="w-4 h-4" />
-                Compare Selected
-              </button>
-            )}
-            <Link to="/scan" className="btn-primary">
-              <ScanSearch className="w-4 h-4" />
-              New Scan
-            </Link>
-          </div>
+    <>
+      <div className="flex flex-wrap items-end justify-between gap-4 mb-5">
+        <div>
+          <div className="eyebrow">Scans</div>
+          <h1>History</h1>
+          <p className="text-[13px] text-ink-65 mt-1">
+            Every scan with its result. Tick two completed scans to compare them.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={compare}
+            disabled={selected.length !== 2}
+            className="btn btn-ghost btn-sm"
+          >
+            <GitCompareArrows className="w-4 h-4" aria-hidden />
+            Compare{selected.length ? ` (${selected.length}/2)` : ""}
+          </button>
+          <Link to="/scan" className="btn btn-primary btn-sm">
+            <ScanSearch className="w-4 h-4" aria-hidden />
+            New scan
+          </Link>
         </div>
       </div>
 
-      {/* Scans List card */}
-      <div style={card}>
+      {deleteMutation.isError && (
+        <div className="alert alert-error mb-4" role="alert">
+          <AlertCircle className="w-4 h-4 shrink-0" aria-hidden />
+          {errorMessage(deleteMutation.error, "Could not delete the scan")}
+        </div>
+      )}
+
+      <section className="card min-w-0 overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-line">
+          <b>{scans ? `${scans.length} ${scans.length === 1 ? "scan" : "scans"}` : "Scans"}</b>
+          <div className="relative w-full sm:w-[260px]">
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-45" aria-hidden />
+            <input
+              type="search"
+              className="input !h-9 !pl-9"
+              placeholder="Search by #, IP, subnet, status"
+              aria-label="Search scans"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+        </div>
+
         {isLoading ? (
-          <HistorySkeleton />
+          <div className="p-4"><ListSkeleton /></div>
+        ) : isError ? (
+          <p className="p-6 text-[13px] text-red" role="alert">Could not load scans.</p>
         ) : !scans || scans.length === 0 ? (
-          <div className="text-center py-16">
-            <div
-              className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-5"
-              style={{
-                background:
-                  "linear-gradient(135deg, rgba(6,182,212,0.2), rgba(124,58,237,0.2))",
-              }}
-            >
-              <Network
-                className="w-7 h-7"
-                style={{ color: "var(--accent-primary)" }}
-              />
-            </div>
-            <p className="text-sm mb-1 font-medium text-white">No scans yet</p>
-            <p className="text-xs mb-6" style={{ color: "var(--text-muted)" }}>
-              Start your first network discovery.
-            </p>
-            <Link to="/scan" className="btn-primary">
-              <ScanSearch className="w-4 h-4" />
-              Run First Scan
+          <div className="text-center px-6 py-14">
+            <h2>No scans yet</h2>
+            <p className="text-[13px] text-ink-65 mt-1 mb-5">Run a scan and it will be listed here.</p>
+            <Link to="/scan" className="btn btn-primary btn-sm">
+              <ScanSearch className="w-4 h-4" aria-hidden /> New scan
             </Link>
           </div>
+        ) : filtered.length === 0 ? (
+          <p className="p-6 text-[13px] text-ink-65">No scan matches “{query}”.</p>
         ) : (
-          <div className="space-y-2">
-            {scans.map((scan) => (
-              <div
-                key={scan.id}
-                className="flex items-center gap-3 px-[14px] py-3 rounded-[10px] transition-all group"
-                style={{
-                  background: selectedForCompare.has(scan.id)
-                    ? "rgba(6, 182, 212, 0.08)"
-                    : "rgba(255, 255, 255, 0.02)",
-                  border: `1px solid ${selectedForCompare.has(scan.id) ? "rgba(6, 182, 212, 0.3)" : "rgba(255, 255, 255, 0.04)"}`,
-                }}
-              >
-                {/* Compare checkbox */}
-                {scan.status === "completed" && (
-                  <input
-                    type="checkbox"
-                    checked={selectedForCompare.has(scan.id)}
-                    onChange={() => toggleCompare(scan.id)}
-                    className="checkbox-accent"
-                    title="Select for comparison"
-                  />
-                )}
-
-                <Link
-                  to={
-                    scan.status === "completed"
-                      ? `/topology/${scan.id}`
-                      : `/scan?poll=${scan.id}`
-                  }
-                  className="flex items-center flex-1 min-w-0 gap-3"
+          <ul>
+            {filtered.map((s) => {
+              const href = s.status === "completed" ? `/topology/${s.id}` : `/scan?poll=${s.id}`;
+              const dur = formatDuration(s.started_at, s.completed_at);
+              const isSel = selected.includes(s.id);
+              return (
+                <li
+                  key={s.id}
+                  className={`flex items-center gap-3 px-4 py-3 border-b border-line-2 last:border-0 ${isSel ? "bg-accent-soft" : ""}`}
                 >
-                  <div
-                    className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
-                    style={{
-                      background:
-                        "linear-gradient(135deg, rgba(6,182,212,0.2), rgba(124,58,237,0.2))",
-                    }}
-                  >
-                    <Network
-                      className="w-[18px] h-[18px]"
-                      style={{ color: "var(--accent-primary)" }}
-                    />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13px] font-medium text-white">
-                      Scan #{scan.id} &mdash; {scan.target_ip}
-                    </p>
-                    <p
-                      className="text-[11px] mt-0.5"
-                      style={{ color: "var(--text-muted)" }}
-                    >
-                      {scan.device_count} devices &middot; {scan.link_count}{" "}
-                      links
-                      {scan.subnets &&
-                        scan.subnets.length > 0 &&
-                        ` \u00b7 ${scan.subnets.join(", ")}`}
-                    </p>
-                    <p
-                      className="text-[10px] mt-0.5"
-                      style={{ color: "var(--text-faint)" }}
-                    >
-                      {scan.created_at && formatDate(scan.created_at)}
-                      {scan.completed_at &&
-                        ` \u2192 ${formatDate(scan.completed_at)}`}
-                    </p>
-                  </div>
-                </Link>
-
-                <div className="flex items-center gap-2">
-                  <StatusBadge status={scan.status} />
-
-                  {/* Delete button */}
-                  {scan.status !== "running" && (
-                    <>
-                      {confirmDeleteId === scan.id ? (
-                        <div className="flex items-center gap-1">
-                          <span
-                            className="text-[10px]"
-                            style={{ color: "var(--red)" }}
-                          >
-                            Delete?
-                          </span>
-                          <button
-                            onClick={() => deleteMutation.mutate(scan.id)}
-                            disabled={deleteMutation.isPending}
-                            className="px-2 py-0.5 rounded text-[10px] font-semibold transition-colors"
-                            style={{
-                              background: "rgba(239,68,68,0.15)",
-                              color: "#ef4444",
-                            }}
-                          >
-                            {deleteMutation.isPending ? "..." : "Yes"}
-                          </button>
-                          <button
-                            onClick={() => setConfirmDeleteId(null)}
-                            className="px-2 py-0.5 rounded text-[10px] font-semibold transition-colors"
-                            style={{
-                              background: "rgba(255,255,255,0.05)",
-                              color: "var(--text-muted)",
-                            }}
-                          >
-                            No
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setConfirmDeleteId(scan.id)}
-                          className="w-7 h-7 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                          style={{ background: "rgba(255,255,255,0.05)" }}
-                          title="Delete scan"
-                        >
-                          <Trash2
-                            className="w-3.5 h-3.5"
-                            style={{ color: "var(--text-muted)" }}
-                          />
-                        </button>
-                      )}
-                    </>
-                  )}
-
-                  <Link
-                    to={
-                      scan.status === "completed"
-                        ? `/topology/${scan.id}`
-                        : `/scan?poll=${scan.id}`
-                    }
-                    className="w-7 h-7 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                    style={{ background: "rgba(255,255,255,0.05)" }}
-                  >
-                    <ArrowRight
-                      className="w-[14px] h-[14px]"
-                      style={{ color: "var(--text-secondary)" }}
-                    />
+                  <span className="w-4 shrink-0">
+                    {s.status === "completed" && (
+                      <input
+                        type="checkbox"
+                        checked={isSel}
+                        disabled={!isSel && selected.length >= 2}
+                        onChange={() => toggleCompare(s.id)}
+                        aria-label={`Select scan ${s.id} to compare`}
+                      />
+                    )}
+                  </span>
+                  <ScanStatusIcon status={s.status} />
+                  <Link to={href} className="min-w-0 flex-1 group">
+                    <b className="block font-mono font-medium text-[13px] truncate group-hover:text-accent">
+                      #{s.id} {s.target_ip}
+                    </b>
+                    <small className="block text-xs text-ink-65 truncate">
+                      {s.status === "failed"
+                        ? s.error_message || "Scan failed"
+                        : `${s.device_count} devices · ${s.link_count} links${s.subnets?.length ? ` · ${s.subnets.join(", ")}` : ""}`}
+                    </small>
+                    <small className="block text-[11.5px] text-ink-45 truncate">
+                      {formatDateTime(s.created_at)}
+                      {dur ? ` · took ${dur}` : ""}
+                    </small>
                   </Link>
-                </div>
-              </div>
-            ))}
-          </div>
+                  <span className="hidden sm:block shrink-0"><ScanStatusPill status={s.status} /></span>
+                  {s.status !== "running" && s.status !== "pending" && (
+                    confirmDeleteId === s.id ? (
+                      <span className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          className="btn btn-danger btn-sm !h-8"
+                          onClick={() => deleteMutation.mutate(s.id)}
+                          disabled={deleteMutation.isPending}
+                        >
+                          {deleteMutation.isPending ? "Deleting…" : "Delete"}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm !h-8"
+                          onClick={() => setConfirmDeleteId(null)}
+                        >
+                          Cancel
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm !h-8 !w-8 !p-0 shrink-0"
+                        onClick={() => setConfirmDeleteId(s.id)}
+                        aria-label={`Delete scan ${s.id}`}
+                        title="Delete scan"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" aria-hidden />
+                      </button>
+                    )
+                  )}
+                </li>
+              );
+            })}
+          </ul>
         )}
-      </div>
-    </div>
+      </section>
+    </>
   );
 }

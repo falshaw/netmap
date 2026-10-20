@@ -1,18 +1,17 @@
-import { Navigate, Outlet } from "react-router-dom";
-
-const STORAGE_KEY = "netmap_authenticated";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
+import { isSignedIn } from "../lib/auth";
 
 /**
- * Route guard: redirects to /login if not authenticated.
- * The actual API key is injected server-side by nginx — this only
- * checks whether the user has validated their key this session.
+ * Route guard: sends the visitor to /login (remembering where they wanted to
+ * go) unless they validated the API key in this tab's session.
  */
 export default function RequireAuth() {
-  const isAuthenticated = sessionStorage.getItem(STORAGE_KEY);
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+  const location = useLocation();
+  if (!isSignedIn()) {
+    const next = location.pathname + location.search;
+    return (
+      <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />
+    );
   }
-
   return <Outlet />;
 }

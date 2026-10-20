@@ -1,70 +1,51 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import {
   BrowserRouter,
   Routes,
   Route,
+  Navigate,
   useLocation,
   Outlet,
 } from "react-router-dom";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Sidebar from "./components/Sidebar";
 import RequireAuth from "./components/RequireAuth";
-import Landing from "./pages/Landing";
+import { AppBackground } from "./components/AppBackground";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import ScanPage from "./pages/Scan";
 import History from "./pages/History";
 import Settings from "./pages/Settings";
-import Topology from "./pages/Topology";
+import TopologyLatest from "./pages/TopologyLatest";
 import ScanDiff from "./pages/ScanDiff";
 import NotFound from "./pages/NotFound";
 
-/**
- * Layout with sidebar for main app pages (dashboard, scan, history, settings).
- * Gold-bordered container wrapping sidebar + content.
- */
+// The canvas (React Flow) is the heaviest part of the app: load it on demand.
+const Topology = lazy(() => import("./pages/Topology"));
+
+/** Glass shell: labelled sidebar + main panel, both full viewport height. */
 function AppShell() {
   return (
-    <div className="min-h-screen flex items-start justify-center p-6">
-      <div
-        className="flex w-full rounded-[20px] overflow-hidden"
-        style={{
-          maxWidth: 1200,
-          border: "1px solid var(--accent-primary)",
-          boxShadow:
-            "0 0 60px rgba(6, 182, 212, 0.15), 0 0 100px rgba(124, 58, 237, 0.1), 0 25px 80px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05)",
-          background:
-            "linear-gradient(145deg, rgba(15,35,64,0.95), rgba(10,22,40,0.98))",
-          minHeight: "calc(100vh - 48px)",
-        }}
-      >
+    <>
+      <AppBackground />
+      <div className="mx-auto flex max-w-[1340px] flex-col gap-3 p-4 lg:flex-row lg:items-start lg:gap-[18px] lg:px-6 lg:py-7">
         <Sidebar />
-        <main className="flex-1 min-w-0">
-          <Outlet />
+        <main className="glass w-full min-w-0 flex-1 p-[18px] sm:px-7 sm:pt-[26px] sm:pb-7 lg:min-h-[calc(100vh-56px)]">
+          <Suspense fallback={<p className="text-ink-65" aria-busy="true">Loading…</p>}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
-    </div>
+    </>
   );
 }
 
-/**
- * Full-screen layout for pages that don't use the sidebar
- * (landing page and topology canvas).
- */
-function FullScreen() {
-  return <Outlet />;
-}
-
-/**
- * Scroll to top on route change.
- */
+/** Scroll to top on route change. */
 function ScrollToTop() {
   const { pathname } = useLocation();
-
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [pathname]);
-
   return null;
 }
 
@@ -74,30 +55,22 @@ function App() {
       <BrowserRouter>
         <ScrollToTop />
         <Routes>
-          {/* Public full-screen routes (no sidebar, no auth) */}
-          <Route element={<FullScreen />}>
-            <Route path="/" element={<Landing />} />
-            <Route path="/login" element={<Login />} />
-          </Route>
+          <Route path="/login" element={<Login />} />
 
-          {/* Protected routes */}
           <Route element={<RequireAuth />}>
-            {/* Full-screen protected routes (no sidebar) */}
-            <Route element={<FullScreen />}>
-              <Route path="/topology/:scanId" element={<Topology />} />
-              <Route path="/compare/:scanIdA/:scanIdB" element={<ScanDiff />} />
-            </Route>
-
-            {/* App shell routes (sidebar) */}
+            {/* No landing page: the app starts on the dashboard. */}
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route element={<AppShell />}>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/scan" element={<ScanPage />} />
               <Route path="/history" element={<History />} />
+              <Route path="/topology" element={<TopologyLatest />} />
+              <Route path="/topology/:scanId" element={<Topology />} />
+              <Route path="/compare/:scanIdA/:scanIdB" element={<ScanDiff />} />
               <Route path="/settings" element={<Settings />} />
             </Route>
           </Route>
 
-          {/* 404 catch-all */}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

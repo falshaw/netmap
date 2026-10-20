@@ -1,265 +1,191 @@
-import { useCallback, useMemo } from "react";
+import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard,
+  LayoutGrid,
   ScanSearch,
-  Clock,
-  Settings,
-  Map,
+  History as HistoryIcon,
+  Waypoints,
+  Settings as SettingsIcon,
   LogOut,
+  Menu,
+  X,
+  type LucideIcon,
 } from "lucide-react";
+import { LogoMark, Wordmark } from "./AppBackground";
+import { ThemeToggle } from "./ThemeToggle";
+import { signOut } from "../lib/auth";
 
-const NAV_ITEMS = [
-  { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { path: "/scan", label: "New Scan", icon: ScanSearch },
-  { path: "/history", label: "History", icon: Clock },
-] as const;
+type NavItem = {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  match: (path: string) => boolean;
+};
+
+const MAIN: NavItem[] = [
+  {
+    to: "/dashboard",
+    label: "Dashboard",
+    icon: LayoutGrid,
+    match: (p) => p === "/dashboard",
+  },
+  {
+    to: "/scan",
+    label: "New scan",
+    icon: ScanSearch,
+    match: (p) => p.startsWith("/scan"),
+  },
+  {
+    to: "/history",
+    label: "History",
+    icon: HistoryIcon,
+    match: (p) => p.startsWith("/history") || p.startsWith("/compare"),
+  },
+];
+
+const TOOLS: NavItem[] = [
+  {
+    to: "/topology",
+    label: "Topology",
+    icon: Waypoints,
+    match: (p) => p.startsWith("/topology"),
+  },
+  {
+    to: "/settings",
+    label: "Settings",
+    icon: SettingsIcon,
+    match: (p) => p.startsWith("/settings"),
+  },
+];
+
+function NavLinks({
+  pathname,
+  onNavigate,
+}: {
+  pathname: string;
+  onNavigate?: () => void;
+}) {
+  const render = (item: NavItem) => {
+    const on = item.match(pathname);
+    const Icon = item.icon;
+    return (
+      <Link
+        key={item.to}
+        to={item.to}
+        onClick={onNavigate}
+        className={`side-link ${on ? "on" : ""}`}
+        aria-current={on ? "page" : undefined}
+      >
+        <Icon aria-hidden />
+        {item.label}
+      </Link>
+    );
+  };
+  return (
+    <>
+      {MAIN.map(render)}
+      <div className="eyebrow mx-3 mt-3.5 mb-1">Tools</div>
+      {TOOLS.map(render)}
+    </>
+  );
+}
 
 export default function Sidebar() {
-  const location = useLocation();
+  const { pathname } = useLocation();
   const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
 
-  const isActive = useCallback(
-    (path: string) => {
-      if (path === "/dashboard") return location.pathname === "/dashboard";
-      return location.pathname.startsWith(path);
-    },
-    [location.pathname],
+  function handleSignOut() {
+    signOut();
+    navigate("/login", { replace: true });
+  }
+
+  const userBlock = (
+    <div className="flex items-center gap-2.5 min-w-0">
+      <span
+        className="grid place-items-center w-8 h-8 rounded-full bg-accent text-white text-[11px] font-bold shrink-0"
+        aria-hidden
+      >
+        API
+      </span>
+      <div className="min-w-0">
+        <div className="font-semibold truncate">API key</div>
+        <div className="text-xs text-ink-65 truncate">Signed in</div>
+      </div>
+    </div>
   );
 
-  const navItems = useMemo(() => NAV_ITEMS.map((item) => item), []);
-
-  const handleSignOut = useCallback(() => {
-    sessionStorage.removeItem("netmap_authenticated");
-    navigate("/login");
-  }, [navigate]);
-
-  const handleNavMouseEnter = useCallback(
-    (e: React.MouseEvent<HTMLElement>, path: string) => {
-      if (!isActive(path)) {
-        e.currentTarget.style.background = "rgba(6, 182, 212, 0.1)";
-        e.currentTarget.style.color = "var(--text-primary)";
-      }
-    },
-    [isActive],
-  );
-
-  const handleNavMouseLeave = useCallback(
-    (e: React.MouseEvent<HTMLElement>, path: string) => {
-      if (!isActive(path)) {
-        e.currentTarget.style.background = "transparent";
-        e.currentTarget.style.color = "var(--text-secondary)";
-      }
-    },
-    [isActive],
-  );
-
-  const handleSignOutMouseEnter = useCallback(
-    (e: React.MouseEvent<HTMLElement>) => {
-      e.currentTarget.style.color = "#ef4444";
-      e.currentTarget.style.background = "rgba(239,68,68,0.1)";
-    },
-    [],
-  );
-
-  const handleSignOutMouseLeave = useCallback(
-    (e: React.MouseEvent<HTMLElement>) => {
-      e.currentTarget.style.color = "var(--text-secondary)";
-      e.currentTarget.style.background = "transparent";
-    },
-    [],
+  const signOutButton = (
+    <button
+      type="button"
+      onClick={handleSignOut}
+      className="inline-flex items-center gap-1.5 text-xs font-medium text-ink-65 hover:text-ink cursor-pointer"
+    >
+      <LogOut className="w-3.5 h-3.5" aria-hidden />
+      Sign out
+    </button>
   );
 
   return (
-    <aside
-      className="h-full flex flex-col flex-shrink-0"
-      style={{
-        width: 220,
-        background: "rgba(0,0,0,0.3)",
-        borderRight: "1px solid rgba(255,255,255,0.05)",
-      }}
-    >
-      {/* Brand */}
-      <div
-        style={{
-          padding: "24px 20px",
-          borderBottom: "1px solid rgba(255,255,255,0.05)",
-          marginBottom: 20,
-        }}
+    <>
+      {/* Desktop: labelled glass sidebar, full viewport height */}
+      <aside
+        className="glass hidden lg:flex sticky top-7 w-[228px] shrink-0 flex-col gap-1 px-3.5 py-[18px] min-h-[calc(100vh-56px)]"
+        aria-label="Main"
       >
-        <Link to="/dashboard" className="flex items-center gap-3">
-          <div
-            className="flex items-center justify-center flex-shrink-0"
-            style={{
-              width: 40,
-              height: 40,
-              background:
-                "linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))",
-              borderRadius: 10,
-              boxShadow: "0 4px 12px rgba(6, 182, 212, 0.3)",
-            }}
-          >
-            <Map
-              className="w-5 h-5"
-              style={{ color: "var(--navy-dark, #030014)" }}
-            />
-          </div>
-          <div>
-            <div className="text-[16px] font-bold text-white">
-              Net<span style={{ color: "var(--accent-primary)" }}>Map</span>
-            </div>
-            <div
-              className="text-[10px] uppercase"
-              style={{ color: "var(--text-muted)", letterSpacing: "1px" }}
-            >
-              SNMP + nmap topology
-            </div>
-          </div>
-        </Link>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex-1" style={{ padding: "0 12px" }}>
-        <div
-          className="text-[10px] font-semibold uppercase mb-2"
-          style={{
-            color: "var(--text-muted)",
-            letterSpacing: "1px",
-            padding: "0 12px",
-          }}
-        >
-          Navigation
-        </div>
-
-        {navItems.map(({ path, label, icon: Icon }) => (
-          <Link
-            key={path}
-            to={path}
-            className="flex items-center gap-3 mb-1 transition-all"
-            style={{
-              padding: "14px 16px",
-              borderRadius: 10,
-              fontSize: 14,
-              color: isActive(path)
-                ? "var(--accent-primary)"
-                : "var(--text-secondary)",
-              background: isActive(path)
-                ? "linear-gradient(90deg, rgba(6,182,212,0.2) 0%, rgba(6,182,212,0.05) 100%)"
-                : "transparent",
-              boxShadow: isActive(path)
-                ? "inset 3px 0 0 var(--accent-primary)"
-                : "none",
-              cursor: "pointer",
-            }}
-            onMouseEnter={(e) => handleNavMouseEnter(e, path)}
-            onMouseLeave={(e) => handleNavMouseLeave(e, path)}
-          >
-            <Icon className="w-[18px] h-[18px] flex-shrink-0" />
-            {label}
-          </Link>
-        ))}
-
-        <div
-          className="text-[10px] font-semibold uppercase mb-2"
-          style={{
-            color: "var(--text-muted)",
-            letterSpacing: "1px",
-            padding: "0 12px",
-            marginTop: 24,
-          }}
-        >
-          Settings
-        </div>
-
         <Link
-          to="/settings"
-          className="flex items-center gap-3 mb-1 transition-all"
-          style={{
-            padding: "14px 16px",
-            borderRadius: 10,
-            fontSize: 14,
-            color: isActive("/settings")
-              ? "var(--accent-primary)"
-              : "var(--text-secondary)",
-            background: isActive("/settings")
-              ? "linear-gradient(90deg, rgba(6,182,212,0.2) 0%, rgba(6,182,212,0.05) 100%)"
-              : "transparent",
-            boxShadow: isActive("/settings")
-              ? "inset 3px 0 0 var(--accent-primary)"
-              : "none",
-            cursor: "pointer",
-          }}
-          onMouseEnter={(e) => handleNavMouseEnter(e, "/settings")}
-          onMouseLeave={(e) => handleNavMouseLeave(e, "/settings")}
+          to="/dashboard"
+          className="flex items-center gap-2.5 font-bold text-base px-2 pt-0.5 pb-[18px]"
         >
-          <Settings className="w-[18px] h-[18px] flex-shrink-0" />
-          Settings
+          <LogoMark />
+          <Wordmark />
         </Link>
-      </div>
-
-      {/* User + Sign Out */}
-      <div
-        style={{
-          padding: 20,
-          borderTop: "1px solid rgba(255,255,255,0.05)",
-          marginTop: "auto",
-        }}
-      >
-        <div className="flex items-center gap-3 mb-4">
-          <div
-            className="flex items-center justify-center flex-shrink-0"
-            style={{
-              width: 36,
-              height: 36,
-              background:
-                "linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))",
-              borderRadius: 8,
-              fontSize: 12,
-              fontWeight: 600,
-              color: "white",
-            }}
-          >
-            NM
+        <nav className="flex flex-col gap-1" aria-label="Main navigation">
+          <NavLinks pathname={pathname} />
+        </nav>
+        <div className="mt-auto border-t border-g-line pt-3.5 px-2 grid gap-3 text-[13px]">
+          {userBlock}
+          <div className="flex items-center justify-between gap-2">
+            {signOutButton}
+            <ThemeToggle />
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-[13px] font-semibold text-white">
-              NetMap Admin
-            </div>
-            <div className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-              Network Engineer
-            </div>
-          </div>
-          <div
-            style={{
-              width: 8,
-              height: 8,
-              background: "#10b981",
-              borderRadius: "50%",
-              boxShadow: "0 0 8px #10b981",
-              animation: "pulse 2s infinite",
-            }}
-          />
         </div>
+      </aside>
 
-        <button
-          onClick={handleSignOut}
-          className="flex items-center gap-3 w-full transition-all"
-          style={{
-            padding: "12px 16px",
-            borderRadius: 10,
-            fontSize: 14,
-            color: "var(--text-secondary)",
-            background: "transparent",
-            border: "none",
-            cursor: "pointer",
-          }}
-          onMouseEnter={handleSignOutMouseEnter}
-          onMouseLeave={handleSignOutMouseLeave}
-        >
-          <LogOut className="w-[18px] h-[18px] flex-shrink-0" />
-          Sign Out
-        </button>
-      </div>
-    </aside>
+      {/* Phone and tablet: glass top bar with a drop-down menu */}
+      <header className="glass lg:hidden w-full !rounded-[18px] px-3 py-2.5">
+        <div className="flex items-center gap-2">
+          <Link
+            to="/dashboard"
+            className="flex items-center gap-2 font-bold text-[15px] mr-auto"
+          >
+            <LogoMark size={32} />
+            <Wordmark />
+          </Link>
+          <ThemeToggle />
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="theme-btn !px-2.5"
+            aria-expanded={open}
+            aria-controls="mobile-nav"
+            aria-label={open ? "Close menu" : "Open menu"}
+          >
+            {open ? <X aria-hidden /> : <Menu aria-hidden />}
+          </button>
+        </div>
+        {open && (
+          <div id="mobile-nav" className="mt-3 border-t border-g-line pt-3">
+            <nav className="flex flex-col gap-1" aria-label="Main navigation">
+              <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
+            </nav>
+            <div className="mt-3 border-t border-g-line pt-3 px-2 flex items-center justify-between gap-3 text-[13px]">
+              {userBlock}
+              {signOutButton}
+            </div>
+          </div>
+        )}
+      </header>
+    </>
   );
 }

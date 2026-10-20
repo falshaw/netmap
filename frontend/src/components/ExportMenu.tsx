@@ -1,135 +1,122 @@
 import { useState, useRef, useEffect } from "react";
-import { Download, FileText, Image, FileDown, ChevronDown } from "lucide-react";
-import { toPng } from "html-to-image";
-import { jsPDF } from "jspdf";
-import { api } from "../services/api";
+import { Download, FileCode2, Image, FileDown, ChevronDown, Loader2 } from "lucide-react";
+import { api, errorMessage } from "../services/api";
 
 interface ExportMenuProps {
   scanId: number;
   canvasRef: React.RefObject<HTMLDivElement | null>;
 }
 
+/** Overlays that belong to the UI, not to the diagram. */
+const SKIP = ["react-flow__controls", "react-flow__minimap", "react-flow__attribution", "dev-panel", "topo-overlay"];
+
+async function canvasPng(el: HTMLElement): Promise<string> {
+  const { toPng } = await import("html-to-image");
+  const bg = getComputedStyle(document.body).backgroundColor || "#eef2f7";
+  return toPng(el, {
+    backgroundColor: bg,
+    pixelRatio: 2,
+    filter: (node) =>
+      !(node instanceof HTMLElement && SKIP.some((c) => node.classList.contains(c))),
+  });
+}
+
 export default function ExportMenu({ scanId, canvasRef }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
-    function handleClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [open]);
 
-  const handleDrawio = async () => {
-    try {
-      await api.exportDrawio(scanId);
-    } catch (err) {
-      console.error("DrawIO export failed:", err);
-    }
+  async function run(kind: string, fn: () => Promise<void>) {
     setOpen(false);
-  };
-
-  const handlePng = async () => {
-    if (!canvasRef.current) return;
+    setError("");
+    setBusy(kind);
     try {
-      const dataUrl = await toPng(canvasRef.current, {
-        backgroundColor: "#030014",
-        pixelRatio: 2,
-      });
-      const link = document.createElement("a");
-      link.download = `netmap-scan-${scanId}.png`;
-      link.href = dataUrl;
-      link.click();
+      await fn();
     } catch (err) {
-      console.error("PNG export failed:", err);
+      setError(`${kind} export failed: ${errorMessage(err, "error")}`);
+    } finally {
+      setBusy(null);
     }
-    setOpen(false);
-  };
+  }
 
-  const handlePdf = async () => {
-    if (!canvasRef.current) return;
-    try {
-      const dataUrl = await toPng(canvasRef.current, {
-        backgroundColor: "#030014",
-        pixelRatio: 2,
-      });
-      const pdf = new jsPDF({ orientation: "landscape", unit: "px" });
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
+  const drawio = () => run("draw.io", () => api.exportDrawio(scanId));
 
+  const png = () =>
+    run("PNG", async () => {
+      if (!canvasRef.current) throw new Error("canvas not ready");
+      const dataUrl = await canvasPng(canvasRef.current);
+      const a = document.createElement("a");
+      a.download = `netmap-scan-${scanId}.png`;
+      a.href = dataUrl;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    });
+
+  const pdf = () =>
+    run("PDF", async () => {
+      if (!canvasRef.current) throw new Error("canvas not ready");
+      const dataUrl = await canvasPng(canvasRef.current);
       const img = new window.Image();
       img.src = dataUrl;
-      await new Promise((resolve) => {
-        img.onload = resolve;
-      });
-
-      const scale = Math.min(pageWidth / img.width, pageHeight / img.height);
+      await img.decode();
+      const { jsPDF } = await import("jspdf");
+      const doc = new jsPDF({ orientation: img.width >= img.height ? "landscape" : "portrait", unit: "px" });
+      const pw = doc.internal.pageSize.getWidth();
+      const ph = doc.internal.pageSize.getHeight();
+      const scale = Math.min(pw / img.width, ph / img.height);
       const w = img.width * scale;
       const h = img.height * scale;
-      const x = (pageWidth - w) / 2;
-      const y = (pageHeight - h) / 2;
-
-      pdf.addImage(dataUrl, "PNG", x, y, w, h);
-      pdf.save(`netmap-scan-${scanId}.pdf`);
-    } catch (err) {
-      console.error("PDF export failed:", err);
-    }
-    setOpen(false);
-  };
+      doc.addImage(dataUrl, "PNG", (pw - w) / 2, (ph - h) / 2, w, h);
+      doc.save(`netmap-scan-${scanId}.pdf`);
+    });
 
   return (
     <div className="relative" ref={menuRef}>
       <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all"
-        style={{
-          background: "rgba(3, 0, 20, 0.8)",
-          borderColor: "var(--border-subtle)",
-          backdropFilter: "blur(8px)",
-        }}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="btn btn-primary btn-sm"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        disabled={busy !== null}
       >
-        <Download className="w-3.5 h-3.5 text-[var(--accent-primary)]" />
-        Export
-        <ChevronDown
-          className={`w-3 h-3 transition-transform ${open ? "rotate-180" : ""}`}
-        />
+        {busy ? <Loader2 className="w-4 h-4 spin" aria-hidden /> : <Download className="w-4 h-4" aria-hidden />}
+        {busy ? `Exporting ${busy}…` : "Export"}
+        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
       </button>
-
       {open && (
-        <div
-          className="absolute right-0 mt-1 w-48 rounded-xl shadow-2xl overflow-hidden z-50"
-          style={{
-            background: "rgba(3, 0, 20, 0.95)",
-            border: "1px solid var(--border-hover)",
-            backdropFilter: "blur(10px)",
-          }}
-        >
-          <button
-            onClick={handleDrawio}
-            className="w-full flex items-center gap-2 px-4 py-2.5 text-xs hover:bg-white/5 transition-colors text-left"
-          >
-            <FileText className="w-3.5 h-3.5 text-[var(--cyan)]" />
-            Download .drawio
+        <div className="menu" role="menu">
+          <button type="button" role="menuitem" onClick={drawio}>
+            <FileCode2 aria-hidden /> draw.io diagram (.drawio)
           </button>
-          <button
-            onClick={handlePng}
-            className="w-full flex items-center gap-2 px-4 py-2.5 text-xs hover:bg-white/5 transition-colors text-left"
-          >
-            <Image className="w-3.5 h-3.5 text-[var(--green)]" />
-            Download PNG
+          <button type="button" role="menuitem" onClick={png}>
+            <Image aria-hidden /> PNG image of the canvas
           </button>
-          <button
-            onClick={handlePdf}
-            className="w-full flex items-center gap-2 px-4 py-2.5 text-xs hover:bg-white/5 transition-colors text-left"
-          >
-            <FileDown className="w-3.5 h-3.5 text-[var(--red)]" />
-            Download PDF
+          <button type="button" role="menuitem" onClick={pdf}>
+            <FileDown aria-hidden /> PDF of the canvas
           </button>
         </div>
+      )}
+      {error && (
+        <p className="absolute right-0 top-[calc(100%+6px)] z-30 w-[260px] alert alert-error" role="alert">
+          {error}
+        </p>
       )}
     </div>
   );

@@ -1,4 +1,5 @@
 import axios from "axios";
+import { signOut } from "../lib/auth";
 
 const client = axios.create({
   baseURL: "/api",
@@ -7,17 +8,44 @@ const client = axios.create({
 
 // API key is injected server-side by nginx proxy header — no client-side header needed.
 
-// Redirect to login on 401/403
+// A 401/403 means the key nginx sends no longer matches the API (rotated or
+// expired): end the UI session and come back here after signing in again.
 client.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401 || error.response?.status === 403) {
-      sessionStorage.removeItem("netmap_authenticated");
-      window.location.href = "/login";
+    const status = error.response?.status;
+    if (status === 401 || status === 403) {
+      signOut();
+      const next = window.location.pathname + window.location.search;
+      window.location.href = `/login?expired=1&next=${encodeURIComponent(next)}`;
     }
     return Promise.reject(error);
   },
 );
+
+/** Readable message from an axios error (FastAPI puts it in `detail`). */
+export function errorMessage(err: unknown, fallback = "Request failed"): string {
+  if (axios.isAxiosError(err)) {
+    const detail = err.response?.data?.detail;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail) && detail[0]?.msg) return String(detail[0].msg);
+    if (err.response) return `${fallback} (HTTP ${err.response.status})`;
+    return "Cannot reach the NetMap API";
+  }
+  return err instanceof Error ? err.message : fallback;
+}
+
+/** Save a Blob as a file, keeping the object URL alive until the click ran. */
+export function saveBlob(blob: Blob, filename: string): void {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+}
 
 export interface ScanRequest {
   target_ip: string;
@@ -190,8 +218,8 @@ export const api = {
     return res.data;
   },
 
-  listScans: async (): Promise<ScanResponse[]> => {
-    const res = await client.get("/scans");
+  listScans: async (limit = 20): Promise<ScanResponse[]> => {
+    const res = await client.get("/scans", { params: { limit } });
     return res.data;
   },
 
@@ -220,12 +248,7 @@ export const api = {
     const res = await client.get(`/scans/${scanId}/export/drawio`, {
       responseType: "blob",
     });
-    const url = window.URL.createObjectURL(res.data);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `netmap-scan-${scanId}.drawio`;
-    link.click();
-    window.URL.revokeObjectURL(url);
+    saveBlob(res.data, `netmap-scan-${scanId}.drawio`);
   },
 
   compareScan: async (idA: number, idB: number): Promise<ScanDiffData> => {

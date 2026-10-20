@@ -1,172 +1,124 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  Settings as SettingsIcon,
-  Wifi,
-  Server,
-  Key,
-  Bell,
-  Save,
-  Loader2,
-  CheckCircle,
-  XCircle,
-  Plug,
-} from "lucide-react";
+import { Radio, ScanSearch, Sparkles, Bell, Save, Loader2, Check, X, Plug, AlertCircle } from "lucide-react";
 import {
   api,
+  errorMessage,
   type SettingsData,
   type LLMTestResult,
 } from "../services/api";
 
-const card: React.CSSProperties = {
-  background: "rgba(255, 255, 255, 0.02)",
-  border: "1px solid rgba(255, 255, 255, 0.06)",
-  borderRadius: 14,
-  padding: 20,
-  backdropFilter: "blur(40px)",
-  WebkitBackdropFilter: "blur(40px)",
-  boxShadow:
-    "0 4px 6px rgba(0,0,0,0.15), 0 20px 50px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)",
-};
+/** One settings section with its own Save button and saved/failed state. */
+function useSection(save: (data: Partial<SettingsData>) => Promise<SettingsData>) {
+  const queryClient = useQueryClient();
+  const [saved, setSaved] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const mutation = useMutation({
+    mutationFn: save,
+    onSuccess: (data) => {
+      queryClient.setQueryData(["settings"], data);
+      setSaved(true);
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => setSaved(false), 2500);
+    },
+  });
+  return { mutation, saved };
+}
 
-function SaveButton({
-  onClick,
-  saving,
-  saved,
+function Card({
+  icon: Icon,
+  tone,
+  title,
+  desc,
+  section,
+  onSave,
+  children,
 }: {
-  onClick: () => void;
-  saving: boolean;
-  saved: boolean;
+  icon: typeof Radio;
+  tone: string;
+  title: string;
+  desc?: string;
+  section: ReturnType<typeof useSection>;
+  onSave: () => void;
+  children: React.ReactNode;
 }) {
+  const { mutation, saved } = section;
   return (
-    <button
-      onClick={onClick}
-      disabled={saving}
-      className="btn-primary !py-2 !px-4 !text-xs"
-    >
-      {saving ? (
-        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-      ) : saved ? (
-        <CheckCircle className="w-3.5 h-3.5" />
-      ) : (
-        <Save className="w-3.5 h-3.5" />
+    <section className="card p-[18px] min-w-0" aria-label={title}>
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className={`grid place-items-center w-9 h-9 rounded-xl shrink-0 ${tone}`} aria-hidden>
+            <Icon className="w-4 h-4" />
+          </span>
+          <h2 className="truncate">{title}</h2>
+        </div>
+        <button type="button" onClick={onSave} disabled={mutation.isPending} className="btn btn-primary btn-sm shrink-0">
+          {mutation.isPending ? <Loader2 className="w-3.5 h-3.5 spin" aria-hidden /> : saved ? <Check className="w-3.5 h-3.5" aria-hidden /> : <Save className="w-3.5 h-3.5" aria-hidden />}
+          {mutation.isPending ? "Saving…" : saved ? "Saved" : "Save"}
+        </button>
+      </div>
+      {desc && <p className="text-[12.5px] text-ink-65 mb-4">{desc}</p>}
+      {mutation.isError && (
+        <div className="alert alert-error mb-3" role="alert">
+          <AlertCircle className="w-4 h-4 shrink-0" aria-hidden />
+          {errorMessage(mutation.error, "Could not save")}
+        </div>
       )}
-      {saving ? "Saving..." : saved ? "Saved" : "Save"}
-    </button>
+      <span className="sr-only" aria-live="polite">{saved ? `${title} saved` : ""}</span>
+      {children}
+    </section>
   );
 }
 
 export default function Settings() {
-  const queryClient = useQueryClient();
-  const { data: settings, isLoading } = useQuery<SettingsData>({
+  const { data: settings, isLoading, isError } = useQuery<SettingsData>({
     queryKey: ["settings"],
     queryFn: api.getSettings,
   });
 
-  // SNMP form state
   const [snmpCommunity, setSnmpCommunity] = useState("");
   const [snmpVersion, setSnmpVersion] = useState("2c");
   const [snmpPort, setSnmpPort] = useState(161);
   const [snmpTimeout, setSnmpTimeout] = useState(5);
   const [snmpRetries, setSnmpRetries] = useState(2);
-
-  // Scan preferences state
   const [scanNmap, setScanNmap] = useState(true);
   const [scanArp, setScanArp] = useState(true);
   const [scanSnmp, setScanSnmp] = useState(true);
-
-  // API / LLM configuration state
   const [llmProvider, setLlmProvider] = useState("ollama");
   const [llmOllamaHost, setLlmOllamaHost] = useState("");
   const [llmOllamaModel, setLlmOllamaModel] = useState("");
   const [llmClaudeModel, setLlmClaudeModel] = useState("sonnet");
   const [testResult, setTestResult] = useState<LLMTestResult | null>(null);
-
-  // Notification preferences state
   const [notifyEnabled, setNotifyEnabled] = useState(false);
   const [notifyWebhookUrl, setNotifyWebhookUrl] = useState("");
   const [notifyOnComplete, setNotifyOnComplete] = useState(true);
   const [notifyOnFailed, setNotifyOnFailed] = useState(true);
 
-  // Saved indicators
-  const [snmpSaved, setSnmpSaved] = useState(false);
-  const [scanSaved, setScanSaved] = useState(false);
-  const [llmSaved, setLlmSaved] = useState(false);
-  const [notifySaved, setNotifySaved] = useState(false);
-  const snmpTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const scanTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const llmTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const notifyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-
   useEffect(() => {
-    return () => {
-      clearTimeout(snmpTimerRef.current);
-      clearTimeout(scanTimerRef.current);
-      clearTimeout(llmTimerRef.current);
-      clearTimeout(notifyTimerRef.current);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (settings) {
-      setSnmpCommunity(settings.snmp_community);
-      setSnmpVersion(settings.snmp_version);
-      setSnmpPort(settings.snmp_port);
-      setSnmpTimeout(settings.snmp_timeout);
-      setSnmpRetries(settings.snmp_retries);
-      setScanNmap(settings.default_scan_nmap);
-      setScanArp(settings.default_scan_arp);
-      setScanSnmp(settings.default_scan_snmp);
-      setLlmProvider(settings.llm_provider);
-      setLlmOllamaHost(settings.llm_ollama_host);
-      setLlmOllamaModel(settings.llm_ollama_model);
-      setLlmClaudeModel(settings.llm_claude_model);
-      setNotifyEnabled(settings.notify_enabled);
-      setNotifyWebhookUrl(settings.notify_webhook_url);
-      setNotifyOnComplete(settings.notify_on_scan_complete);
-      setNotifyOnFailed(settings.notify_on_scan_failed);
-    }
+    if (!settings) return;
+    setSnmpCommunity(settings.snmp_community);
+    setSnmpVersion(settings.snmp_version);
+    setSnmpPort(settings.snmp_port);
+    setSnmpTimeout(settings.snmp_timeout);
+    setSnmpRetries(settings.snmp_retries);
+    setScanNmap(settings.default_scan_nmap);
+    setScanArp(settings.default_scan_arp);
+    setScanSnmp(settings.default_scan_snmp);
+    setLlmProvider(settings.llm_provider);
+    setLlmOllamaHost(settings.llm_ollama_host);
+    setLlmOllamaModel(settings.llm_ollama_model);
+    setLlmClaudeModel(settings.llm_claude_model);
+    setNotifyEnabled(settings.notify_enabled);
+    setNotifyWebhookUrl(settings.notify_webhook_url);
+    setNotifyOnComplete(settings.notify_on_scan_complete);
+    setNotifyOnFailed(settings.notify_on_scan_failed);
   }, [settings]);
 
-  const snmpMutation = useMutation({
-    mutationFn: (data: Partial<SettingsData>) => api.updateSettings(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["settings"] });
-      setSnmpSaved(true);
-      clearTimeout(snmpTimerRef.current);
-      snmpTimerRef.current = setTimeout(() => setSnmpSaved(false), 2000);
-    },
-  });
-
-  const scanMutation = useMutation({
-    mutationFn: (data: Partial<SettingsData>) => api.updateSettings(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["settings"] });
-      setScanSaved(true);
-      clearTimeout(scanTimerRef.current);
-      scanTimerRef.current = setTimeout(() => setScanSaved(false), 2000);
-    },
-  });
-
-  const llmMutation = useMutation({
-    mutationFn: (data: Partial<SettingsData>) => api.updateSettings(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["settings"] });
-      setLlmSaved(true);
-      clearTimeout(llmTimerRef.current);
-      llmTimerRef.current = setTimeout(() => setLlmSaved(false), 2000);
-    },
-  });
-
-  const notifyMutation = useMutation({
-    mutationFn: (data: Partial<SettingsData>) => api.updateSettings(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["settings"] });
-      setNotifySaved(true);
-      clearTimeout(notifyTimerRef.current);
-      notifyTimerRef.current = setTimeout(() => setNotifySaved(false), 2000);
-    },
-  });
+  const snmp = useSection(api.updateSettings);
+  const scan = useSection(api.updateSettings);
+  const llm = useSection(api.updateSettings);
+  const notify = useSection(api.updateSettings);
 
   const testMutation = useMutation({
     mutationFn: () =>
@@ -176,528 +128,258 @@ export default function Settings() {
         llm_ollama_model: llmOllamaModel,
         llm_claude_model: llmClaudeModel,
       }),
+    onMutate: () => setTestResult(null),
     onSuccess: (res) => setTestResult(res),
-    onError: () =>
+    onError: (err) =>
       setTestResult({
         ok: false,
         provider: llmProvider,
         model: "",
-        detail: "Test request failed",
+        detail: errorMessage(err, "Test request failed"),
         model_available: null,
       }),
   });
 
-  const saveSnmp = () => {
-    snmpMutation.mutate({
-      snmp_community: snmpCommunity,
-      snmp_version: snmpVersion,
-      snmp_port: snmpPort,
-      snmp_timeout: snmpTimeout,
-      snmp_retries: snmpRetries,
-    });
-  };
-
-  const saveScan = () => {
-    scanMutation.mutate({
-      default_scan_nmap: scanNmap,
-      default_scan_arp: scanArp,
-      default_scan_snmp: scanSnmp,
-    });
-  };
-
-  const saveLlm = () => {
-    setTestResult(null);
-    llmMutation.mutate({
-      llm_provider: llmProvider,
-      llm_ollama_host: llmOllamaHost,
-      llm_ollama_model: llmOllamaModel,
-      llm_claude_model: llmClaudeModel,
-    });
-  };
-
-  const saveNotify = () => {
-    notifyMutation.mutate({
-      notify_enabled: notifyEnabled,
-      notify_webhook_url: notifyWebhookUrl,
-      notify_on_scan_complete: notifyOnComplete,
-      notify_on_scan_failed: notifyOnFailed,
-    });
-  };
+  const head = (
+    <div className="mb-5">
+      <div className="eyebrow">Configuration</div>
+      <h1>Settings</h1>
+      <p className="text-[13px] text-ink-65 mt-1">
+        Defaults for new scans, the optional LLM provider and webhook
+        notifications. Credentials are stored encrypted.
+      </p>
+    </div>
+  );
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2
-          className="w-6 h-6 animate-spin"
-          style={{ color: "var(--accent-primary)" }}
-        />
-      </div>
+      <>
+        {head}
+        <div className="flex items-center gap-2 text-ink-65" aria-busy="true">
+          <Loader2 className="w-4 h-4 spin" aria-hidden /> Loading settings…
+        </div>
+      </>
+    );
+  }
+  if (isError) {
+    return (
+      <>
+        {head}
+        <div className="alert alert-error" role="alert">
+          <AlertCircle className="w-4 h-4 shrink-0" aria-hidden /> Could not load settings.
+        </div>
+      </>
     );
   }
 
   return (
-    <div style={{ padding: "24px 28px" }} className="grid gap-5">
-      {/* Header card */}
-      <div style={card}>
-        <div className="flex items-center justify-between">
-          <div>
-            <span
-              className="text-[13px] font-semibold uppercase tracking-[0.5px]"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              Settings
-            </span>
-            <p className="text-sm mt-2" style={{ color: "var(--text-muted)" }}>
-              Application configuration and preferences
-            </p>
-          </div>
-          <div
-            className="w-10 h-10 rounded-[10px] flex items-center justify-center flex-shrink-0"
-            style={{
-              background:
-                "linear-gradient(135deg, rgba(6,182,212,0.2), rgba(124,58,237,0.2))",
-            }}
-          >
-            <SettingsIcon
-              className="w-5 h-5"
-              style={{ color: "var(--accent-primary)" }}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Settings grid */}
-      <div
-        className="grid gap-5 settings-grid"
-        style={{ gridTemplateColumns: "1fr 1fr" }}
-      >
-        {/* SNMP Defaults */}
-        <div style={card}>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div
-                className="w-9 h-9 rounded-lg flex items-center justify-center"
-                style={{
-                  background:
-                    "linear-gradient(135deg, rgba(6,182,212,0.2), rgba(124,58,237,0.2))",
-                }}
-              >
-                <Wifi
-                  className="w-4 h-4"
-                  style={{ color: "var(--accent-primary)" }}
-                />
-              </div>
-              <h3 className="text-[13px] font-semibold text-white">
-                SNMP Defaults
-              </h3>
-            </div>
-            <SaveButton
-              onClick={saveSnmp}
-              saving={snmpMutation.isPending}
-              saved={snmpSaved}
-            />
-          </div>
-
+    <>
+      {head}
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card
+          icon={Radio}
+          tone="bg-accent-soft text-accent"
+          title="SNMP defaults"
+          desc="Used when a scan does not set its own community or version."
+          section={snmp}
+          onSave={() =>
+            snmp.mutation.mutate({
+              snmp_community: snmpCommunity,
+              snmp_version: snmpVersion,
+              snmp_port: snmpPort,
+              snmp_timeout: snmpTimeout,
+              snmp_retries: snmpRetries,
+            })
+          }
+        >
           <div className="grid gap-3">
             <div>
-              <label className="input-label">Community String</label>
-              <input
-                type="text"
-                value={snmpCommunity}
-                onChange={(e) => setSnmpCommunity(e.target.value)}
-                className="input-field"
-                placeholder="public"
-              />
+              <label className="label" htmlFor="s-community">Community string</label>
+              <input id="s-community" className="input font-mono" value={snmpCommunity} onChange={(e) => setSnmpCommunity(e.target.value)} placeholder="public" autoComplete="off" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="input-label">Version</label>
-                <select
-                  value={snmpVersion}
-                  onChange={(e) => setSnmpVersion(e.target.value)}
-                  className="input-field"
-                >
+                <label className="label" htmlFor="s-version">Version</label>
+                <select id="s-version" className="input" value={snmpVersion} onChange={(e) => setSnmpVersion(e.target.value)}>
                   <option value="1">v1</option>
                   <option value="2c">v2c</option>
                   <option value="3">v3</option>
                 </select>
               </div>
               <div>
-                <label className="input-label">Port</label>
-                <input
-                  type="number"
-                  value={snmpPort}
-                  onChange={(e) => setSnmpPort(parseInt(e.target.value) || 161)}
-                  className="input-field"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="input-label">Timeout (sec)</label>
-                <input
-                  type="number"
-                  value={snmpTimeout}
-                  onChange={(e) =>
-                    setSnmpTimeout(parseInt(e.target.value) || 5)
-                  }
-                  className="input-field"
-                  min={1}
-                  max={30}
-                />
+                <label className="label" htmlFor="s-port">Port</label>
+                <input id="s-port" type="number" className="input" value={snmpPort} min={1} max={65535} onChange={(e) => setSnmpPort(parseInt(e.target.value) || 161)} />
               </div>
               <div>
-                <label className="input-label">Retries</label>
-                <input
-                  type="number"
-                  value={snmpRetries}
-                  onChange={(e) =>
-                    setSnmpRetries(parseInt(e.target.value) || 2)
-                  }
-                  className="input-field"
-                  min={0}
-                  max={10}
-                />
+                <label className="label" htmlFor="s-timeout">Timeout (s)</label>
+                <input id="s-timeout" type="number" className="input" value={snmpTimeout} min={1} max={30} onChange={(e) => setSnmpTimeout(parseInt(e.target.value) || 5)} />
+              </div>
+              <div>
+                <label className="label" htmlFor="s-retries">Retries</label>
+                <input id="s-retries" type="number" className="input" value={snmpRetries} min={0} max={10} onChange={(e) => setSnmpRetries(Number.isNaN(parseInt(e.target.value)) ? 2 : parseInt(e.target.value))} />
               </div>
             </div>
           </div>
-        </div>
+        </Card>
 
-        {/* Scan Preferences */}
-        <div style={card}>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div
-                className="w-9 h-9 rounded-lg flex items-center justify-center"
-                style={{
-                  background:
-                    "linear-gradient(135deg, rgba(6,182,212,0.2), rgba(124,58,237,0.2))",
-                }}
-              >
-                <Server
-                  className="w-4 h-4"
-                  style={{ color: "var(--accent-primary)" }}
-                />
-              </div>
-              <h3 className="text-[13px] font-semibold text-white">
-                Scan Preferences
-              </h3>
-            </div>
-            <SaveButton
-              onClick={saveScan}
-              saving={scanMutation.isPending}
-              saved={scanSaved}
-            />
-          </div>
-
-          <p
-            className="text-[12px] mb-4 leading-relaxed"
-            style={{ color: "var(--text-muted)" }}
-          >
-            Default scan methods used when starting a new scan. Can be
-            overridden per-scan.
-          </p>
-
-          <div className="space-y-3">
+        <Card
+          icon={ScanSearch}
+          tone="bg-teal-soft text-teal"
+          title="Scan methods"
+          desc="Ticked on the New scan form by default; each scan can change them."
+          section={scan}
+          onSave={() =>
+            scan.mutation.mutate({
+              default_scan_nmap: scanNmap,
+              default_scan_arp: scanArp,
+              default_scan_snmp: scanSnmp,
+            })
+          }
+        >
+          <div className="grid gap-2">
             {[
-              {
-                id: "snmp",
-                label: "SNMP Discovery",
-                desc: "System info, interfaces, CDP/LLDP neighbors",
-                checked: scanSnmp,
-                toggle: setScanSnmp,
-              },
-              {
-                id: "nmap",
-                label: "nmap Port Scan",
-                desc: "Host discovery, port scanning, OS fingerprinting",
-                checked: scanNmap,
-                toggle: setScanNmap,
-              },
-              {
-                id: "arp",
-                label: "ARP Scan",
-                desc: "Layer 2 MAC address discovery (requires raw sockets)",
-                checked: scanArp,
-                toggle: setScanArp,
-              },
-            ].map(({ id, label, desc, checked, toggle }) => (
-              <label
-                key={id}
-                className="flex items-start gap-3 px-3 py-2.5 rounded-lg transition-colors cursor-pointer"
-                style={{
-                  background: checked
-                    ? "rgba(6, 182, 212, 0.05)"
-                    : "transparent",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={(e) => toggle(e.target.checked)}
-                  className="checkbox-accent mt-0.5"
-                />
-                <div>
-                  <div className="text-[13px] font-medium text-white">
-                    {label}
-                  </div>
-                  <div
-                    className="text-[11px] mt-0.5"
-                    style={{ color: "var(--text-muted)" }}
-                  >
-                    {desc}
-                  </div>
-                </div>
+              { label: "SNMP discovery", desc: "System info, interfaces, CDP/LLDP neighbours", checked: scanSnmp, set: setScanSnmp },
+              { label: "nmap", desc: "Live hosts and service ports", checked: scanNmap, set: setScanNmap },
+              { label: "ARP", desc: "MAC addresses on the local segment (needs raw sockets)", checked: scanArp, set: setScanArp },
+            ].map((m) => (
+              <label key={m.label} className={`opt ${m.checked ? "on" : ""}`}>
+                <input type="checkbox" checked={m.checked} onChange={(e) => m.set(e.target.checked)} />
+                <span>
+                  <b className="block text-[13.5px]">{m.label}</b>
+                  <small className="text-[12px] text-ink-65">{m.desc}</small>
+                </span>
               </label>
             ))}
           </div>
-        </div>
+        </Card>
 
-        {/* API Configuration */}
-        <div style={card}>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div
-                className="w-9 h-9 rounded-lg flex items-center justify-center"
-                style={{
-                  background:
-                    "linear-gradient(135deg, rgba(6,182,212,0.2), rgba(124,58,237,0.2))",
-                }}
-              >
-                <Key
-                  className="w-4 h-4"
-                  style={{ color: "var(--accent-primary)" }}
-                />
-              </div>
-              <h3 className="text-[13px] font-semibold text-white">
-                API Configuration
-              </h3>
-            </div>
-            <SaveButton
-              onClick={saveLlm}
-              saving={llmMutation.isPending}
-              saved={llmSaved}
-            />
-          </div>
-
-          <p
-            className="text-[12px] mb-4 leading-relaxed"
-            style={{ color: "var(--text-muted)" }}
-          >
-            LLM provider for device enrichment. Ollama runs locally; Claude
-            routes through the host CLI bridge.
-          </p>
-
+        <Card
+          icon={Sparkles}
+          tone="bg-amber-soft text-amber"
+          title="LLM provider"
+          desc="Optional. Scanning, topology and export work without it; today only the connection test below uses it. Ollama runs locally; Claude goes through the host CLI bridge."
+          section={llm}
+          onSave={() => {
+            setTestResult(null);
+            llm.mutation.mutate({
+              llm_provider: llmProvider,
+              llm_ollama_host: llmOllamaHost,
+              llm_ollama_model: llmOllamaModel,
+              llm_claude_model: llmClaudeModel,
+            });
+          }}
+        >
           <div className="grid gap-3">
             <div>
-              <label className="input-label">Provider</label>
+              <label className="label" htmlFor="l-provider">Provider</label>
               <select
+                id="l-provider"
+                className="input"
                 value={llmProvider}
                 onChange={(e) => {
                   setLlmProvider(e.target.value);
                   setTestResult(null);
                 }}
-                className="input-field"
               >
                 <option value="ollama">Ollama (local)</option>
                 <option value="claude">Claude (CLI bridge)</option>
               </select>
             </div>
-
             {llmProvider === "ollama" ? (
               <>
                 <div>
-                  <label className="input-label">Ollama Host</label>
-                  <input
-                    type="text"
-                    value={llmOllamaHost}
-                    onChange={(e) => setLlmOllamaHost(e.target.value)}
-                    className="input-field"
-                    placeholder="http://host.docker.internal:11434"
-                  />
+                  <label className="label" htmlFor="l-host">Ollama host</label>
+                  <input id="l-host" className="input font-mono" value={llmOllamaHost} onChange={(e) => setLlmOllamaHost(e.target.value)} placeholder="http://host.docker.internal:11434" autoComplete="off" />
+                  <p className="hint">Blank = OLLAMA_HOST from .env.</p>
                 </div>
                 <div>
-                  <label className="input-label">Ollama Model</label>
-                  <input
-                    type="text"
-                    value={llmOllamaModel}
-                    onChange={(e) => setLlmOllamaModel(e.target.value)}
-                    className="input-field"
-                    placeholder="qwen2.5:7b"
-                  />
+                  <label className="label" htmlFor="l-model">Ollama model</label>
+                  <input id="l-model" className="input font-mono" value={llmOllamaModel} onChange={(e) => setLlmOllamaModel(e.target.value)} placeholder="qwen2.5:7b" autoComplete="off" />
+                  <p className="hint">Must already be pulled on that host. Blank = OLLAMA_MODEL from .env.</p>
                 </div>
               </>
             ) : (
               <div>
-                <label className="input-label">Claude Model</label>
-                <select
-                  value={llmClaudeModel}
-                  onChange={(e) => setLlmClaudeModel(e.target.value)}
-                  className="input-field"
-                >
+                <label className="label" htmlFor="l-claude">Claude model</label>
+                <select id="l-claude" className="input" value={llmClaudeModel} onChange={(e) => setLlmClaudeModel(e.target.value)}>
                   <option value="haiku">haiku</option>
                   <option value="sonnet">sonnet</option>
                   <option value="opus">opus</option>
                 </select>
               </div>
             )}
-
-            <div className="flex items-center gap-3 pt-1 flex-wrap">
-              <button
-                onClick={() => testMutation.mutate()}
-                disabled={testMutation.isPending}
-                className="btn-secondary !py-2 !px-4 !text-xs"
-              >
-                {testMutation.isPending ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Plug className="w-3.5 h-3.5" />
-                )}
-                {testMutation.isPending ? "Testing..." : "Test connection"}
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <button type="button" onClick={() => testMutation.mutate()} disabled={testMutation.isPending} className="btn btn-ghost btn-sm">
+                {testMutation.isPending ? <Loader2 className="w-3.5 h-3.5 spin" aria-hidden /> : <Plug className="w-3.5 h-3.5" aria-hidden />}
+                {testMutation.isPending ? "Testing…" : "Test connection"}
               </button>
-              {testResult && (
-                <div
-                  className="flex items-center gap-1.5 text-[12px]"
-                  style={{
-                    color: testResult.ok ? "var(--green)" : "var(--red)",
-                  }}
-                >
-                  {testResult.ok ? (
-                    <CheckCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                  ) : (
-                    <XCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                  )}
-                  <span>{testResult.detail}</span>
-                </div>
-              )}
+              <span className="text-xs text-ink-45">Tests what is on screen, saved or not.</span>
             </div>
-          </div>
-        </div>
-
-        {/* Notifications */}
-        <div style={card}>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div
-                className="w-9 h-9 rounded-lg flex items-center justify-center"
-                style={{
-                  background:
-                    "linear-gradient(135deg, rgba(6,182,212,0.2), rgba(124,58,237,0.2))",
-                }}
-              >
-                <Bell
-                  className="w-4 h-4"
-                  style={{ color: "var(--accent-primary)" }}
-                />
+            {testResult && (
+              <div className={`alert ${testResult.ok ? "alert-ok" : "alert-error"}`} role="status">
+                {testResult.ok ? <Check className="w-4 h-4 shrink-0" aria-hidden /> : <X className="w-4 h-4 shrink-0" aria-hidden />}
+                <span className="min-w-0 break-words">
+                  <b>{testResult.ok ? "Connected" : "Failed"}</b>
+                  {testResult.model ? <> · <span className="font-mono">{testResult.model}</span></> : null}
+                  <br />
+                  {testResult.detail}
+                </span>
               </div>
-              <h3 className="text-[13px] font-semibold text-white">
-                Notifications
-              </h3>
-            </div>
-            <SaveButton
-              onClick={saveNotify}
-              saving={notifyMutation.isPending}
-              saved={notifySaved}
-            />
+            )}
           </div>
+        </Card>
 
-          <p
-            className="text-[12px] mb-4 leading-relaxed"
-            style={{ color: "var(--text-muted)" }}
-          >
-            POST a JSON payload to a webhook when a scan finishes. Works with
-            Slack, Discord, and Mattermost incoming webhooks.
-          </p>
-
+        <Card
+          icon={Bell}
+          tone="bg-red-soft text-red"
+          title="Notifications"
+          desc="POST a JSON payload to a webhook when a scan finishes. Works with Slack, Discord and Mattermost incoming webhooks."
+          section={notify}
+          onSave={() =>
+            notify.mutation.mutate({
+              notify_enabled: notifyEnabled,
+              notify_webhook_url: notifyWebhookUrl,
+              notify_on_scan_complete: notifyOnComplete,
+              notify_on_scan_failed: notifyOnFailed,
+            })
+          }
+        >
           <div className="grid gap-3">
-            <label
-              className="flex items-start gap-3 px-3 py-2.5 rounded-lg transition-colors cursor-pointer"
-              style={{
-                background: notifyEnabled
-                  ? "rgba(6, 182, 212, 0.05)"
-                  : "transparent",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={notifyEnabled}
-                onChange={(e) => setNotifyEnabled(e.target.checked)}
-                className="checkbox-accent mt-0.5"
-              />
-              <div>
-                <div className="text-[13px] font-medium text-white">
-                  Enable notifications
-                </div>
-                <div
-                  className="text-[11px] mt-0.5"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  Send webhook alerts for the selected scan events.
-                </div>
-              </div>
+            <label className={`opt ${notifyEnabled ? "on" : ""}`}>
+              <input type="checkbox" checked={notifyEnabled} onChange={(e) => setNotifyEnabled(e.target.checked)} />
+              <span>
+                <b className="block text-[13.5px]">Enable notifications</b>
+                <small className="text-[12px] text-ink-65">Send a webhook for the events ticked below.</small>
+              </span>
             </label>
-
             <div>
-              <label className="input-label">Webhook URL</label>
+              <label className="label" htmlFor="n-url">Webhook URL</label>
               <input
+                id="n-url"
                 type="url"
+                className="input font-mono"
                 value={notifyWebhookUrl}
                 onChange={(e) => setNotifyWebhookUrl(e.target.value)}
-                className="input-field"
-                placeholder="https://hooks.example.com/services/..."
+                placeholder="https://hooks.example.com/services/…"
                 disabled={!notifyEnabled}
-                style={{ opacity: notifyEnabled ? 1 : 0.5 }}
+                autoComplete="off"
               />
-              <p
-                className="text-[11px] mt-1.5"
-                style={{ color: "var(--text-muted)" }}
-              >
-                Stored encrypted at rest.
-              </p>
+              <p className="hint">Stored encrypted at rest.</p>
             </div>
-
-            <div className="space-y-2">
+            <div className="flex flex-wrap gap-x-5 gap-y-2">
               {[
-                {
-                  id: "complete",
-                  label: "Scan completed",
-                  checked: notifyOnComplete,
-                  toggle: setNotifyOnComplete,
-                },
-                {
-                  id: "failed",
-                  label: "Scan failed",
-                  checked: notifyOnFailed,
-                  toggle: setNotifyOnFailed,
-                },
-              ].map(({ id, label, checked, toggle }) => (
-                <label
-                  key={id}
-                  className="flex items-center gap-3 px-3 py-2 rounded-lg transition-colors cursor-pointer"
-                  style={{
-                    background:
-                      checked && notifyEnabled
-                        ? "rgba(6, 182, 212, 0.05)"
-                        : "transparent",
-                    opacity: notifyEnabled ? 1 : 0.5,
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={(e) => toggle(e.target.checked)}
-                    className="checkbox-accent"
-                    disabled={!notifyEnabled}
-                  />
-                  <span className="text-[13px] font-medium text-white">
-                    {label}
-                  </span>
+                { label: "Scan completed", checked: notifyOnComplete, set: setNotifyOnComplete },
+                { label: "Scan failed", checked: notifyOnFailed, set: setNotifyOnFailed },
+              ].map((m) => (
+                <label key={m.label} className={`inline-flex items-center gap-2 text-[13px] ${notifyEnabled ? "cursor-pointer" : "opacity-50"}`}>
+                  <input type="checkbox" checked={m.checked} disabled={!notifyEnabled} onChange={(e) => m.set(e.target.checked)} />
+                  {m.label}
                 </label>
               ))}
             </div>
           </div>
-        </div>
+        </Card>
       </div>
-    </div>
+    </>
   );
 }

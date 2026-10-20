@@ -1,29 +1,26 @@
 import { useRef, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, AlertCircle, Search } from "lucide-react";
-import { api, type TopologyData } from "../services/api";
-import TopologyCanvas from "../components/topology/TopologyCanvas";
+import { Loader2, AlertCircle, Search } from "lucide-react";
+import axios from "axios";
+import { api, errorMessage, type TopologyData } from "../services/api";
+import TopologyCanvas, { LINK_METHODS } from "../components/topology/TopologyCanvas";
 import ExportMenu from "../components/ExportMenu";
-
-const DEVICE_TYPE_PILLS = [
-  { type: "firewall", label: "Firewall", color: "#d4af37" },
-  { type: "router", label: "Router", color: "#06b6d4" },
-  { type: "switch", label: "Switch", color: "#3b82f6" },
-  { type: "server", label: "Server", color: "#8b5cf6" },
-  { type: "endpoint", label: "Endpoint", color: "#6b7280" },
-];
+import { deviceType, sortedTypeCounts } from "../lib/devices";
 
 export default function Topology() {
-  const { scanId } = useParams<{ scanId: string }>();
+  const { scanId = "" } = useParams<{ scanId: string }>();
+  const id = /^\d+$/.test(scanId) ? parseInt(scanId, 10) : NaN;
   const canvasRef = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
 
   const { data, isLoading, error } = useQuery<TopologyData>({
     queryKey: ["topology", scanId],
-    queryFn: () => api.getTopology(parseInt(scanId!, 10)),
-    enabled: !!scanId && Number.isFinite(parseInt(scanId!, 10)),
+    queryFn: () => api.getTopology(id),
+    enabled: Number.isFinite(id),
+    retry: (count, err) =>
+      count < 1 && !(axios.isAxiosError(err) && [400, 404].includes(err.response?.status ?? 0)),
   });
 
   const toggleFilter = useCallback((type: string) => {
@@ -35,145 +32,134 @@ export default function Topology() {
     });
   }, []);
 
+  if (!Number.isFinite(id)) {
+    return (
+      <div className="card p-8 text-center max-w-[460px] mx-auto">
+        <h1 className="!text-xl">No such scan</h1>
+        <p className="text-[13px] text-ink-65 mt-2">“{scanId}” is not a scan number.</p>
+        <Link to="/history" className="btn btn-primary btn-sm mt-5">Scan history</Link>
+      </div>
+    );
+  }
+
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen">
-        <Loader2
-          className="w-10 h-10 animate-spin mb-4"
-          style={{ color: "var(--accent-primary)" }}
-        />
-        <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-          Loading topology...
-        </p>
+      <div className="grid place-items-center min-h-[50vh] text-ink-65" aria-busy="true">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 spin mx-auto mb-3 text-accent" aria-hidden />
+          Loading topology…
+        </div>
       </div>
     );
   }
 
   if (error || !data) {
-    const errMsg = (error as Error)?.message || "";
-    const isScanRunning =
-      errMsg.includes("not complete") || errMsg.includes("running");
-
+    const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+    const msg = errorMessage(error, "Failed to load topology");
+    const running = status === 400 && /running|pending/.test(msg);
     return (
-      <div className="flex flex-col items-center justify-center h-screen">
-        <AlertCircle
-          className="w-10 h-10 mb-4"
-          style={{
-            color: isScanRunning ? "var(--accent-primary)" : "var(--red)",
-          }}
-        />
-        <p
-          className="text-sm mb-4"
-          style={{
-            color: isScanRunning ? "var(--text-secondary)" : "var(--red)",
-          }}
-        >
-          {isScanRunning
-            ? "This scan is still in progress."
-            : errMsg || "Failed to load topology"}
+      <div className="card p-8 text-center max-w-[480px] mx-auto">
+        <AlertCircle className={`w-9 h-9 mx-auto mb-3 ${running ? "text-accent" : "text-red"}`} aria-hidden />
+        <h1 className="!text-xl">
+          {status === 404 ? `Scan #${id} not found` : running ? `Scan #${id} is still running` : "No topology"}
+        </h1>
+        <p className="text-[13px] text-ink-65 mt-2">
+          {status === 404 ? "It may have been deleted." : msg}
         </p>
-        <div className="flex gap-3">
-          {isScanRunning && (
-            <Link
-              to={`/scan?poll=${scanId}`}
-              className="btn-primary"
-              style={{ padding: "10px 20px" }}
-            >
-              View Progress
-            </Link>
+        <div className="flex gap-2 justify-center mt-5">
+          {running && (
+            <Link to={`/scan?poll=${id}`} className="btn btn-primary btn-sm">View progress</Link>
           )}
-          <Link to="/dashboard" className="btn-secondary">
-            Back to Dashboard
-          </Link>
+          <Link to="/history" className="btn btn-ghost btn-sm">Scan history</Link>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="h-screen flex flex-col">
-      {/* Toolbar */}
-      <div
-        className="flex items-center justify-between px-4 py-2.5 border-b topology-toolbar"
-        style={{
-          background: "rgba(3, 0, 20, 0.95)",
-          borderColor: "var(--border-subtle)",
-        }}
-      >
-        <div className="flex items-center gap-3">
-          <Link
-            to="/dashboard"
-            className="p-1.5 rounded-lg transition-colors"
-            style={{ color: "var(--text-secondary)" }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.background =
-                "rgba(255,255,255,0.05)";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.background = "transparent";
-            }}
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </Link>
-          <div>
-            <h1 className="text-sm font-bold text-white">
-              Scan #{data.scan_id}
-            </h1>
-            <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-              {data.stats.device_count} devices &middot; {data.stats.link_count}{" "}
-              links &middot; {data.stats.network_count} networks
-            </p>
-          </div>
-        </div>
+  const types = sortedTypeCounts(data.stats.device_types);
 
-        {/* Search + filter pills */}
-        <div className="flex items-center gap-3">
+  return (
+    <>
+      <div className="flex flex-wrap items-end justify-between gap-4 mb-4">
+        <div className="min-w-0">
+          <div className="eyebrow">
+            <Link to="/history" className="hover:text-accent">History</Link> / Scan #{data.scan_id}
+          </div>
+          <h1>Topology</h1>
+          <p className="text-[13px] text-ink-65 mt-0.5">
+            {data.stats.device_count} devices · {data.stats.link_count} links ·{" "}
+            {data.stats.network_count} {data.stats.network_count === 1 ? "subnet" : "subnets"}
+            <span className="hidden sm:inline"> · drag nodes to arrange, click one for details</span>
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
-            <Search
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5"
-              style={{ color: "var(--text-muted)" }}
-            />
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-45" aria-hidden />
             <input
-              type="text"
-              placeholder="Search devices..."
+              type="search"
+              placeholder="Search devices"
+              aria-label="Search devices by name, IP, MAC or vendor"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="input-field !py-1.5 !pl-8 !pr-3 !text-xs"
-              style={{ maxWidth: 200 }}
+              className="input !h-8 !w-[200px] !pl-9 !text-[13px] !rounded-full"
             />
           </div>
-
-          <div className="flex gap-1">
-            {DEVICE_TYPE_PILLS.map(({ type, label, color }) => (
-              <button
-                key={type}
-                onClick={() => toggleFilter(type)}
-                className="px-2 py-1 rounded-md text-[10px] font-semibold transition-all"
-                style={{
-                  background: activeFilters.has(type)
-                    ? `${color}33`
-                    : "rgba(255,255,255,0.03)",
-                  border: `1px solid ${activeFilters.has(type) ? color : "rgba(255,255,255,0.06)"}`,
-                  color: activeFilters.has(type) ? color : "var(--text-muted)",
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
           <ExportMenu scanId={data.scan_id} canvasRef={canvasRef} />
         </div>
       </div>
 
-      {/* Canvas */}
-      <div ref={canvasRef} className="flex-1">
-        <TopologyCanvas
-          data={data}
-          searchQuery={searchQuery}
-          activeFilters={activeFilters}
-        />
+      {types.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-3" role="group" aria-label="Filter by device type">
+          {types.map(([t, n]) => {
+            const info = deviceType(t);
+            const on = activeFilters.has(t);
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => toggleFilter(t)}
+                aria-pressed={on}
+                className="pill cursor-pointer border"
+                style={{
+                  borderColor: on ? info.color : "var(--g-line)",
+                  background: on ? `color-mix(in srgb, ${info.color} 14%, transparent)` : "var(--g-bg2)",
+                  color: on ? info.color : "var(--ink-65)",
+                }}
+              >
+                <span className="h-2 w-2 rounded-full" style={{ background: info.color }} aria-hidden />
+                {info.label} <span className="font-mono">{n}</span>
+              </button>
+            );
+          })}
+          {activeFilters.size > 0 && (
+            <button type="button" onClick={() => setActiveFilters(new Set())} className="pill p-grey cursor-pointer">
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+
+      {data.devices.length === 0 ? (
+        <div className="card p-8 text-center">
+          <h2>No devices found</h2>
+          <p className="text-[13px] text-ink-65 mt-1">
+            Nothing answered in the scanned range. Check the subnets and that the
+            scanner can reach them.
+          </p>
+          <Link to="/scan" className="btn btn-primary btn-sm mt-5">New scan</Link>
+        </div>
+      ) : (
+        <div ref={canvasRef} className="topo-canvas">
+          <TopologyCanvas data={data} searchQuery={searchQuery} activeFilters={activeFilters} />
+        </div>
+      )}
+
+      <div className="legend lines mt-3">
+        {LINK_METHODS.map((m) => (
+          <span key={m.method} style={{ "--c": m.color } as React.CSSProperties}>{m.label}</span>
+        ))}
+        <span style={{ "--c": "var(--edge)" } as React.CSSProperties}>Other</span>
       </div>
-    </div>
+    </>
   );
 }

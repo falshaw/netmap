@@ -14,10 +14,12 @@ export default function Login() {
     setLoading(true);
 
     try {
-      // Validate via GET — nginx injects the X-API-Key header server-side.
-      // (The backend's POST validate route was removed during hardening because
-      // it bypassed the require_api_key dependency, so GET is the only path.)
-      const res = await fetch("/api/auth/validate", { method: "GET" });
+      // nginx injects X-API-Key server-side, so the key typed here is sent in
+      // X-Login-Key and compared by the API; a wrong key is rejected.
+      const res = await fetch("/api/auth/validate", {
+        method: "GET",
+        headers: { "X-Login-Key": apiKey },
+      });
 
       if (!res.ok) {
         setError("Invalid API key");

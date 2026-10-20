@@ -1,8 +1,11 @@
 """NetMap - Network Diagram Generator API"""
 
+import hmac
 import os
 import logging
-from fastapi import FastAPI, Depends
+from typing import Optional
+
+from fastapi import FastAPI, Depends, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from slowapi import _rate_limit_exceeded_handler
@@ -98,8 +101,17 @@ async def api_health():
 
 
 @app.get("/api/auth/validate", dependencies=api_key_dep)
-async def validate_api_key():
-    """Validate API key — returns 200 if key is valid, 401/403 otherwise."""
+async def validate_api_key(x_login_key: Optional[str] = Header(default=None)):
+    """Validate the API key — 200 if valid, 401/403 otherwise.
+
+    Behind the nginx frontend X-API-Key is always injected server-side, so the
+    UI login sends the key the user typed in X-Login-Key. When present it must
+    match API_KEY as well.
+    """
+    if x_login_key is not None and not hmac.compare_digest(
+        x_login_key.encode(), os.getenv("API_KEY", "").encode()
+    ):
+        raise HTTPException(status_code=403, detail="Invalid API key")
     return {"valid": True}
 
 

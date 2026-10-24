@@ -50,11 +50,10 @@ class TestIsHostAddress:
 
 
 class TestNmapArguments:
-    def test_limited_mode_keeps_host_discovery(self):
+    def test_limited_mode_port_scan_is_unprivileged(self):
+        # -Pn is safe here: the port scan only gets hosts a discovery pass proved live.
         args = _nmap_arguments(PORTS, True, "limited").split()
-        assert "-Pn" not in args
-        assert "--unprivileged" in args
-        assert f"-PS{PORTS}" in args
+        assert "--unprivileged" in args and "-sT" in args
         assert "-O" not in args
 
     def test_full_mode_keeps_host_discovery(self):

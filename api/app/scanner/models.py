@@ -38,6 +38,8 @@ class DiscoveredDevice(BaseModel):
     sys_object_id: Optional[str] = None
     sys_location: Optional[str] = None
     sys_contact: Optional[str] = None
+    # TCP ports nmap found open (used for classification and gateway inference)
+    open_ports: list[int] = []
     uptime_seconds: Optional[int] = None
     snmp_reachable: bool = False
     interfaces: list[DiscoveredInterface] = []

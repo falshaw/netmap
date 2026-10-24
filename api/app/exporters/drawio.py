@@ -37,6 +37,10 @@ DEVICE_STYLES = {
         "shape=mxgraph.cisco.wireless.wireless_bridge;"
         "sketch=0;fillColor=#036897;fontColor=#FFFFFF;strokeColor=#006EAF;"
     ),
+    "media": (
+        "shape=mxgraph.cisco.misc.generic_appliance;"
+        "sketch=0;fillColor=#9D174D;fontColor=#FFFFFF;strokeColor=#831843;"
+    ),
     "unknown": (
         "shape=mxgraph.cisco.misc.generic_appliance;"
         "sketch=0;fillColor=#585858;fontColor=#FFFFFF;strokeColor=#333333;"

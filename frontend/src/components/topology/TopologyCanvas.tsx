@@ -59,12 +59,12 @@ function formatBandwidth(mbps: number): string {
 const MINIMAP = {
   light: {
     firewall: "#b91c1c", router: "#0d9488", switch: "#2563eb", wireless_ap: "#0891b2",
-    server: "#6d28d9", endpoint: "#475569", printer: "#b45309", unknown: "#64748b",
+    server: "#6d28d9", endpoint: "#475569", printer: "#b45309", media: "#be185d", unknown: "#64748b",
     network: "#93c5fd", mask: "rgba(238,242,247,0.7)", dot: "rgba(23,32,51,0.16)",
   },
   dark: {
     firewall: "#f87171", router: "#2dd4bf", switch: "#3b82f6", wireless_ap: "#22d3ee",
-    server: "#a78bfa", endpoint: "#94a3b8", printer: "#fbbf24", unknown: "#94a3b8",
+    server: "#a78bfa", endpoint: "#94a3b8", printer: "#fbbf24", media: "#f472b6", unknown: "#94a3b8",
     network: "#1e3a8a", mask: "rgba(12,17,27,0.7)", dot: "rgba(255,255,255,0.1)",
   },
 } as const;

@@ -22,7 +22,9 @@ from app.scanner.snmp import (
     snmp_get_vlans,
     snmp_get_routes,
 )
-from app.scanner.nmap_scanner import scan_subnet, mac_vendor_lookup, is_host_address
+from app.scanner.nmap_scanner import (
+    scan_subnet, mac_vendor_lookup, is_host_address, reverse_dns, refine_by_hostname,
+)
 from app.scanner.arp_scanner import arp_scan
 from app.scanner.topology import build_topology
 from app.scanner.models import DiscoveredDevice, DiscoveredInterface
@@ -149,6 +151,9 @@ async def run_scan(
                             existing.vendor = dev.vendor
                         if existing.device_type == "unknown" and dev.device_type != "unknown":
                             existing.device_type = dev.device_type
+                        if not existing.hostname and dev.hostname:
+                            existing.hostname = dev.hostname
+                        existing.open_ports = sorted(set(existing.open_ports) | set(dev.open_ports))
 
         # Phase 8: ARP scan for L2 discovery
         if scan_arp and subnets:
@@ -175,7 +180,8 @@ async def run_scan(
 
         # Phase 9: Build topology
         _update_phase(db, scan, "Building topology", 85)
-        infer_gateways(devices, subnets, routes, _local_default_gateway())
+        gateways = infer_gateways(devices, subnets, routes, _local_default_gateway())
+        await _names_from_gateways(devices, gateways)
         links, networks = build_topology(
             devices=devices,
             interfaces=all_interfaces,
@@ -209,6 +215,27 @@ async def run_scan(
         scan.completed_at = datetime.now(timezone.utc)
         db.commit()
         await _maybe_notify(db, scan, "failed")
+
+
+async def _names_from_gateways(devices: dict[str, DiscoveredDevice], gateways: dict[str, str]) -> None:
+    """Fill missing hostnames from each subnet gateway that runs DNS (port 53)."""
+    import asyncio
+
+    loop = asyncio.get_event_loop()
+    for subnet, gw in gateways.items():
+        if 53 not in devices[gw].open_ports:
+            continue
+        net = ipaddress.ip_network(subnet, strict=False)
+        nameless = [ip for ip, d in devices.items() if not d.hostname and _in_network(ip, net)]
+        if not nameless:
+            continue
+        names = await loop.run_in_executor(None, reverse_dns, nameless, gw)
+        for ip, name in names.items():
+            dev = devices[ip]
+            dev.hostname = name
+            if ip != gw:
+                dev.device_type = refine_by_hostname(dev.device_type, name)
+        logger.info("Reverse DNS via %s named %d of %d hosts", gw, len(names), len(nameless))
 
 
 def has_snmp_credentials(version: str, community: Optional[str], v3_user: Optional[str]) -> bool:
@@ -435,13 +462,17 @@ def infer_gateways(
             None,
         )
         # A confirmed gateway that also serves something (e.g. a web UI) is still
-        # the router; the first-address convention only relabels unclassified hosts.
+        # the router; the first-address convention only relabels unclassified
+        # hosts, or a "server" that also runs DNS - the profile of a home or
+        # office router.
         relabel = ("unknown", "endpoint", "server")
         if gw is None and net.num_addresses > 2:
             first = str(net.network_address + 1)
             if first in devices:
                 gw = first
-                relabel = ("unknown", "endpoint")
+                relabel = ("unknown", "endpoint", "media")
+                if 53 in devices[first].open_ports:
+                    relabel += ("server",)
         if gw is None:
             continue
         found[str(net)] = gw
@@ -511,7 +542,7 @@ def _auto_layout(
         x_cursor += width + _GROUP_GAP
 
     # Anything not in a network: grid below, infrastructure first.
-    order = ["firewall", "router", "switch", "wireless_ap", "server", "endpoint", "printer", "unknown"]
+    order = ["firewall", "router", "switch", "wireless_ap", "server", "endpoint", "media", "printer", "unknown"]
     rest = sorted(
         (ip for ip in devices if ip not in positions),
         key=lambda ip: (

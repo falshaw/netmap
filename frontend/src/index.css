@@ -595,6 +595,8 @@
   --c-server: var(--violet);
   --c-endpoint: var(--slate);
   --c-printer: var(--amber);
+  --c-media: #be185d;
+  --pink-soft: rgba(190, 24, 93, 0.1);
   --c-unknown: #64748b;
   --c-network: var(--accent);
   --canvas-pane: rgba(255, 255, 255, 0.5);
@@ -606,6 +608,8 @@
   --violet-soft: rgba(167, 139, 250, 0.14);
   --slate: #94a3b8;
   --c-wireless_ap: #22d3ee;
+  --c-media: #f472b6;
+  --pink-soft: rgba(244, 114, 182, 0.14);
   --c-unknown: #94a3b8;
   --canvas-pane: rgba(10, 15, 26, 0.55);
   --canvas-dot: rgba(255, 255, 255, 0.1);
@@ -616,6 +620,10 @@
   .b-violet {
     background: var(--violet-soft);
     color: var(--violet);
+  }
+  .b-pink {
+    background: var(--pink-soft);
+    color: var(--c-media);
   }
 
   /* Dashboard tiles */

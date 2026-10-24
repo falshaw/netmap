@@ -11,6 +11,8 @@ Everything runs locally in Docker. Scan results, SNMP credentials and diagrams s
   - ARP sweep (scapy) when raw sockets are available
   - SNMP v1 / v2c / v3 (pysnmp): system info (incl. uptime, contact, sysObjectID), interfaces and utilisation, ARP table, CDP and LLDP neighbours, VLANs, routing table. v3 uses a USM user with optional auth (MD5, SHA-1, SHA-224, SHA-256) and privacy (DES, 3DES, AES-128/192/256). Timeout and retries come from Settings.
   - the scanner leaves its own addresses (the API container in bridge mode) out of the results
+  - device types from the open ports and the DNS name: router, switch, firewall, server, PC, phone, printer, IoT / media (speakers, TVs, cast devices)
+  - hostnames from the subnet gateway's DNS (home and office routers name their DHCP clients)
   - topology builder that merges these into devices, interfaces, links and networks
 - **Interactive topology** - React Flow canvas with device types, a device detail panel, and drag-to-arrange layouts (devices and subnet nodes) that are saved per scan.
 - **Device list** - every device of a scan in one searchable table, filterable by type; a row opens the device on the topology.
@@ -38,7 +40,9 @@ Container names, the network and its subnet are not fixed: Compose prefixes them
 
 ### Scan modes
 
-- **Bridge networking (default, Windows/macOS/Linux):** the API container runs with `SCAN_MODE=limited` and no extra capabilities. nmap runs unprivileged: host discovery and port scans use TCP connect, so a host counts as live when it answers on any probed port (open *or* closed). No ARP and no OS fingerprinting. From inside Docker Desktop's VM it can reach the compose network and whatever the VM can route to.
+- **Bridge networking (default, Windows/macOS/Linux):** the API container runs with `SCAN_MODE=limited` and no extra capabilities. No ARP, no ping and no OS fingerprinting: a host counts as live when it accepts or refuses a TCP connect on one of a dozen common ports (SSH, DNS, HTTP/S, SMB, AirPlay, Sonos, Chromecast, NAS, UPnP, iPhone). Discovery keeps at most 64 connects open at a time, because Docker Desktop's NAT drops connects when hundreds are pending; nmap then port-scans only the hosts found. From inside Docker Desktop's VM it can reach the compose network and your LAN.
+
+  **Limit:** a device that answers on none of those ports is invisible in this mode. That includes sleeping phones and tablets, a NAS in hibernation and clients with a strict firewall. On a home LAN with 20 devices a bridge-mode scan found the 17 that were awake; the other 3 only showed up in the router's ARP table. Host networking (below) uses ARP and finds those too.
 - **Host networking (Linux only):** full raw-socket scanning (ARP, SYN scan, OS detection) with `NET_RAW` + `NET_ADMIN`:
 
   ```bash

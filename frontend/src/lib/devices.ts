@@ -6,6 +6,7 @@ import {
   Server,
   Monitor,
   Printer,
+  Speaker,
   CircleHelp,
   type LucideIcon,
 } from "lucide-react";
@@ -27,6 +28,7 @@ export const DEVICE_TYPES: DeviceTypeInfo[] = [
   { type: "wireless_ap", label: "Wireless AP", color: "var(--c-wireless_ap)", icon: Wifi, badge: "b-teal" },
   { type: "server", label: "Server", color: "var(--c-server)", icon: Server, badge: "b-violet" },
   { type: "endpoint", label: "Endpoint", color: "var(--c-endpoint)", icon: Monitor, badge: "b-grey" },
+  { type: "media", label: "IoT / media", color: "var(--c-media)", icon: Speaker, badge: "b-pink" },
   { type: "printer", label: "Printer", color: "var(--c-printer)", icon: Printer, badge: "b-amber" },
   { type: "unknown", label: "Unknown", color: "var(--c-unknown)", icon: CircleHelp, badge: "b-grey" },
 ];

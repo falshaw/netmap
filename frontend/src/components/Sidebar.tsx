@@ -5,6 +5,7 @@ import {
   ScanSearch,
   History as HistoryIcon,
   Waypoints,
+  Server,
   Settings as SettingsIcon,
   LogOut,
   Menu,
@@ -49,6 +50,12 @@ const TOOLS: NavItem[] = [
     label: "Topology",
     icon: Waypoints,
     match: (p) => p.startsWith("/topology"),
+  },
+  {
+    to: "/devices",
+    label: "Devices",
+    icon: Server,
+    match: (p) => p.startsWith("/devices"),
   },
   {
     to: "/settings",

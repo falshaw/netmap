@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, useSearchParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, AlertCircle, Search } from "lucide-react";
 import axios from "axios";
@@ -11,6 +11,10 @@ import { deviceType, sortedTypeCounts } from "../lib/devices";
 export default function Topology() {
   const { scanId = "" } = useParams<{ scanId: string }>();
   const id = /^\d+$/.test(scanId) ? parseInt(scanId, 10) : NaN;
+  // /topology/:id?device=<id> opens with that device selected (from the device list).
+  const [searchParams] = useSearchParams();
+  const deviceParam = searchParams.get("device");
+  const initialDeviceId = deviceParam && /^\d+$/.test(deviceParam) ? parseInt(deviceParam, 10) : null;
   const canvasRef = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
@@ -150,7 +154,12 @@ export default function Topology() {
         </div>
       ) : (
         <div ref={canvasRef} className="topo-canvas">
-          <TopologyCanvas data={data} searchQuery={searchQuery} activeFilters={activeFilters} />
+          <TopologyCanvas
+            data={data}
+            searchQuery={searchQuery}
+            activeFilters={activeFilters}
+            initialSelectedId={initialDeviceId}
+          />
         </div>
       )}
 

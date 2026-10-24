@@ -15,6 +15,7 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import ScanPage from "./pages/Scan";
 import History from "./pages/History";
+import Devices from "./pages/Devices";
 import Settings from "./pages/Settings";
 import TopologyLatest from "./pages/TopologyLatest";
 import ScanDiff from "./pages/ScanDiff";
@@ -64,6 +65,7 @@ function App() {
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/scan" element={<ScanPage />} />
               <Route path="/history" element={<History />} />
+              <Route path="/devices" element={<Devices />} />
               <Route path="/topology" element={<TopologyLatest />} />
               <Route path="/topology/:scanId" element={<Topology />} />
               <Route path="/compare/:scanIdA/:scanIdB" element={<ScanDiff />} />

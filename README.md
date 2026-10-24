@@ -9,13 +9,15 @@ Everything runs locally in Docker. Scan results, SNMP credentials and diagrams s
 - **Discovery pipeline** (`api/app/scanner/orchestrator.py`):
   - nmap host discovery with service detection (`-sV`), OS fingerprinting in full mode, MAC vendor lookup
   - ARP sweep (scapy) when raw sockets are available
-  - SNMP v2c / v3 (pysnmp): system info, interfaces and utilisation, ARP table, CDP and LLDP neighbours, VLANs, routing table
+  - SNMP v1 / v2c / v3 (pysnmp): system info (incl. uptime, contact, sysObjectID), interfaces and utilisation, ARP table, CDP and LLDP neighbours, VLANs, routing table. v3 uses a USM user with optional auth (MD5, SHA-1, SHA-224, SHA-256) and privacy (DES, 3DES, AES-128/192/256). Timeout and retries come from Settings.
+  - the scanner leaves its own addresses (the API container in bridge mode) out of the results
   - topology builder that merges these into devices, interfaces, links and networks
-- **Interactive topology** - React Flow canvas with device types, a device detail panel, and drag-to-arrange layouts that are saved per scan.
+- **Interactive topology** - React Flow canvas with device types, a device detail panel, and drag-to-arrange layouts (devices and subnet nodes) that are saved per scan.
+- **Device list** - every device of a scan in one searchable table, filterable by type; a row opens the device on the topology.
 - **Export** - draw.io XML with Cisco shapes (via N2G), plus PNG and PDF from the canvas.
 - **Scan history and diff** - list past scans and compare two scans to see added, removed and changed devices.
 - **Dashboard** - aggregate stats across scans.
-- **Settings** - default SNMP parameters and scan options, webhook notifications on scan complete / failed (Slack, Discord and Mattermost compatible payload), and an optional LLM provider with a connection test.
+- **Settings** - default SNMP parameters (community or v3 credentials, port, timeout, retries) and scan options, webhook notifications on scan complete / failed (Slack, Discord and Mattermost compatible payload), and an optional LLM provider with a connection test.
 - **Security** - API-key auth on every API route (constant-time compare), SNMP credentials and webhook URL encrypted at rest with Fernet, rate limiting (slowapi), hardened containers, API and database bound to `127.0.0.1`. The nginx frontend injects the API key server-side, so the browser never stores it. The login page checks the key you type, but because the proxy adds the key to every `/api` request, anyone who can reach the frontend port can use the API through it: keep it bound to `127.0.0.1` (the default) or put real authentication in front of it.
 
 ## Architecture
@@ -88,7 +90,7 @@ curl -s -X POST http://127.0.0.1:8021/api/scans \
   -d '{"target_ip": "<gateway>", "subnets": ["<first /28>"], "scan_snmp": false, "scan_arp": false}'
 ```
 
-The scan should report one device per running container plus the network gateway, then show them in **Topology**.
+The scan should report one device per running container plus the network gateway (the API container itself is left out), then show them in **Topology** and **Devices**.
 
 ### Local development without Docker
 
@@ -143,7 +145,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-Tests cover nmap result parsing and live-host filtering, device classification, gateway inference, the topology builder and layout, an end-to-end scan run against a fake nmap result, SNMP helpers and the draw.io exporter. nmap itself is not needed for the tests.
+Tests cover nmap result parsing and live-host filtering, device classification, gateway inference, the topology builder and layout, an end-to-end scan run against a fake nmap result, SNMP helpers (v3 credentials, timeout/retries, v1 vs. bulk walks), saved subnet positions and the draw.io exporter. The frontend has its own Vitest suite (`cd frontend && npm test`). nmap itself is not needed for the tests.
 
 ## License
 

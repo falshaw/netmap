@@ -124,6 +124,8 @@ CREATE TABLE IF NOT EXISTS networks (
     gateway_ip VARCHAR(45),
     gateway_device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,
     device_count INTEGER DEFAULT 0,
+    position_x FLOAT,
+    position_y FLOAT,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -139,6 +141,12 @@ CREATE TABLE IF NOT EXISTS app_settings (
     snmp_port INTEGER DEFAULT 161,
     snmp_timeout INTEGER DEFAULT 5,
     snmp_retries INTEGER DEFAULT 2,
+    -- SNMPv3 (USM); the passwords are encrypted at rest like the community.
+    snmp_v3_user VARCHAR(100),
+    snmp_v3_auth_protocol VARCHAR(10),
+    snmp_v3_auth_password VARCHAR(512),
+    snmp_v3_priv_protocol VARCHAR(10),
+    snmp_v3_priv_password VARCHAR(512),
     default_scan_nmap BOOLEAN DEFAULT true,
     default_scan_arp BOOLEAN DEFAULT true,
     default_scan_snmp BOOLEAN DEFAULT true,

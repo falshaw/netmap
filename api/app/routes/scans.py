@@ -17,6 +17,10 @@ from app.rate_limit import limiter
 router = APIRouter()
 
 
+_V3_PLAIN_FIELDS = ("snmp_v3_user", "snmp_v3_auth_protocol", "snmp_v3_priv_protocol")
+_V3_SECRET_FIELDS = ("snmp_v3_auth_password", "snmp_v3_priv_password")
+
+
 def apply_settings_defaults(scan_req: ScanRequest, settings: AppSettings | None) -> None:
     """Fill the SNMP fields a scan request left unset from the saved Settings.
 
@@ -29,6 +33,43 @@ def apply_settings_defaults(scan_req: ScanRequest, settings: AppSettings | None)
         scan_req.snmp_version = (settings.snmp_version if settings else None) or "2c"
     if scan_req.snmp_port is None:
         scan_req.snmp_port = (settings.snmp_port if settings else None) or 161
+    if settings is not None:
+        for field in _V3_PLAIN_FIELDS:
+            if getattr(scan_req, field) is None:
+                setattr(scan_req, field, getattr(settings, field) or None)
+        for field in _V3_SECRET_FIELDS:
+            if getattr(scan_req, field) is None:
+                setattr(scan_req, field, decrypt_value(getattr(settings, field)) or None)
+
+
+def snmp_options(scan_req: ScanRequest, settings: AppSettings | None) -> dict:
+    """SNMPv3 credentials and transport timing for ``run_scan``."""
+    return dict(
+        v3_user=scan_req.snmp_v3_user or None,
+        v3_auth_protocol=scan_req.snmp_v3_auth_protocol or None,
+        v3_auth_password=scan_req.snmp_v3_auth_password or None,
+        v3_priv_protocol=scan_req.snmp_v3_priv_protocol or None,
+        v3_priv_password=scan_req.snmp_v3_priv_password or None,
+        timeout=settings.snmp_timeout if settings else None,
+        retries=settings.snmp_retries if settings else None,
+    )
+
+
+def v3_problem(options: dict) -> str | None:
+    """Why these SNMPv3 credentials cannot work, or None when they can."""
+    if not options["v3_user"]:
+        return "SNMPv3 needs a user name: enter one on the scan or save it in Settings"
+    if options["v3_auth_protocol"] and not options["v3_auth_password"]:
+        return "SNMPv3 auth protocol is set but there is no auth password"
+    if options["v3_priv_protocol"] and not options["v3_priv_password"]:
+        return "SNMPv3 privacy protocol is set but there is no privacy password"
+    if options["v3_priv_protocol"] and not options["v3_auth_protocol"]:
+        return "SNMPv3 privacy (encryption) needs an auth protocol as well"
+    for name in ("v3_auth_password", "v3_priv_password"):
+        # USM key localisation (RFC 3414) needs passphrases of 8+ characters.
+        if options[name] and len(options[name]) < 8:
+            return "SNMPv3 passwords must be at least 8 characters"
+    return None
 
 
 @router.post("", response_model=ScanResponse, status_code=201)
@@ -41,6 +82,11 @@ async def create_scan(
     """Start a new network scan. Falls back to AppSettings defaults."""
     settings = db.query(AppSettings).filter(AppSettings.id == 1).first()
     apply_settings_defaults(scan_req, settings)
+    options = snmp_options(scan_req, settings)
+    if scan_req.scan_snmp and scan_req.snmp_version == "3":
+        problem = v3_problem(options)
+        if problem:
+            raise HTTPException(status_code=422, detail=problem)
 
     scan = Scan(
         target_ip=scan_req.target_ip,
@@ -71,6 +117,7 @@ async def create_scan(
                     scan_nmap=scan_req.scan_nmap,
                     scan_arp=scan_req.scan_arp,
                     scan_snmp=scan_req.scan_snmp,
+                    **options,
                 ),
                 timeout=600,  # 10 minute max scan duration
             )

@@ -73,17 +73,20 @@ interface TopologyCanvasProps {
   data: TopologyData;
   searchQuery?: string;
   activeFilters?: Set<string>;
+  /** Device to open in the side panel on first render. */
+  initialSelectedId?: number | null;
 }
 
 export default function TopologyCanvas({
   data,
   searchQuery = "",
   activeFilters,
+  initialSelectedId = null,
 }: TopologyCanvasProps) {
   const queryClient = useQueryClient();
   const theme = useTheme();
   const palette = MINIMAP[theme];
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(initialSelectedId);
   const [saveError, setSaveError] = useState(false);
   const query = useDeferredValue(searchQuery.trim().toLowerCase());
   const filters = useDeferredValue(activeFilters);
@@ -127,10 +130,14 @@ export default function TopologyCanvas({
         ? (gateway.position_y ?? 0) + NETWORK_GAP_Y
         : Math.min(...hosts.map((d) => d.position_y ?? 0)) - NETWORK_GAP_Y;
       const x = gateway ? (gateway.position_x ?? 0) + DEVICE_NODE_WIDTH / 2 : centre;
+      // A subnet the user dragged keeps its saved place.
+      const saved = net.position_x != null && net.position_y != null;
       out.push({
         id: `network-${net.id}`,
         type: "network",
-        position: { x: x - NETWORK_NODE_WIDTH / 2, y },
+        position: saved
+          ? { x: net.position_x!, y: net.position_y! }
+          : { x: x - NETWORK_NODE_WIDTH / 2, y },
         draggable: true,
         selectable: false,
         data: {
@@ -232,9 +239,27 @@ export default function TopologyCanvas({
 
   const onNodeDragStop: NodeMouseHandler = useCallback(
     (_, node) => {
+      const { x, y } = node.position;
+      if (node.id.startsWith("network-")) {
+        const networkId = parseInt(node.id.slice(8), 10);
+        queryClient.setQueryData<TopologyData>(["topology", String(data.scan_id)], (old) =>
+          old
+            ? {
+                ...old,
+                networks: old.networks.map((n) =>
+                  n.id === networkId ? { ...n, position_x: x, position_y: y } : n,
+                ),
+              }
+            : old,
+        );
+        api
+          .updatePositions(data.scan_id, [], [{ network_id: networkId, x, y }])
+          .then(() => setSaveError(false))
+          .catch(() => setSaveError(true));
+        return;
+      }
       if (!node.id.startsWith("device-")) return;
       const deviceId = parseInt(node.id.slice(7), 10);
-      const { x, y } = node.position;
       // Keep the cached topology in step, so the moved node stays put when the
       // search/filter changes or the page is opened again from the cache.
       queryClient.setQueryData<TopologyData>(["topology", String(data.scan_id)], (old) =>

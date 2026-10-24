@@ -41,7 +41,7 @@ async def run_scan(
     scan_nmap: bool = True,
     scan_arp: bool = True,
     scan_snmp: bool = True,
-    **v3_kwargs,
+    **snmp_options,
 ) -> None:
     """Run the full scan pipeline:
     1. SNMP system info on target
@@ -53,6 +53,10 @@ async def run_scan(
     7. ARP scan
     8. Build topology (infer links)
     9. Persist to database
+
+    ``snmp_options`` go to every SNMP call: the v3 USM fields (``v3_user``,
+    ``v3_auth_protocol``, ``v3_auth_password``, ``v3_priv_protocol``,
+    ``v3_priv_password``) and the transport ``timeout`` / ``retries``.
     """
     scan = db.query(Scan).filter(Scan.id == scan_id).first()
     if not scan:
@@ -74,14 +78,14 @@ async def run_scan(
     vlans = []
 
     try:
-        # Phase 1: SNMP on primary target
-        if scan_snmp and snmp_community:
+        # Phase 1: SNMP on primary target (v1/v2c need a community, v3 a user)
+        if scan_snmp and has_snmp_credentials(snmp_version, snmp_community, snmp_options.get("v3_user")):
             _update_phase(db, scan, "SNMP system discovery", 5)
             snmp_kwargs = dict(
                 port=snmp_port,
                 community=snmp_community,
                 version=snmp_version,
-                **v3_kwargs,
+                **snmp_options,
             )
 
             system = await snmp_get_system(target_ip, **snmp_kwargs)
@@ -119,12 +123,17 @@ async def run_scan(
                 routes = await snmp_get_routes(target_ip, **snmp_kwargs)
                 vlans = await snmp_get_vlans(target_ip, **snmp_kwargs)
 
+        # The scanner's own addresses are not part of the network being mapped.
+        own_ips = local_ipv4_addresses() - {target_ip}
+
         # Phase 7: nmap subnet scan
         if scan_nmap and subnets:
             _update_phase(db, scan, "nmap subnet scanning", 65)
             for subnet in subnets:
                 nmap_devices = await scan_subnet(subnet)
                 for dev in nmap_devices:
+                    if dev.ip_address in own_ips:
+                        continue
                     if dev.ip_address not in devices:
                         devices[dev.ip_address] = dev
                     else:
@@ -149,6 +158,8 @@ async def run_scan(
                 for entry in arp_hosts:
                     # Only real ARP replies from host addresses become devices.
                     if not is_host_address(entry.ip_address, subnet):
+                        continue
+                    if entry.ip_address in own_ips:
                         continue
                     if entry.ip_address not in devices:
                         vendor = mac_vendor_lookup(entry.mac_address)
@@ -198,6 +209,39 @@ async def run_scan(
         scan.completed_at = datetime.now(timezone.utc)
         db.commit()
         await _maybe_notify(db, scan, "failed")
+
+
+def has_snmp_credentials(version: str, community: Optional[str], v3_user: Optional[str]) -> bool:
+    """SNMPv3 authenticates with a USM user, v1/v2c with a community string."""
+    if version == "3":
+        return bool(v3_user)
+    return bool(community)
+
+
+def local_ipv4_addresses(fib_trie: str = "/proc/net/fib_trie") -> set[str]:
+    """IPv4 addresses assigned to this host (the API container in bridge mode).
+
+    Reads the kernel's LOCAL routes from ``/proc/net/fib_trie`` (Linux only),
+    so no extra tools are needed in the image. Loopback is left out; anywhere
+    else, or if the file cannot be read, the result is empty.
+    """
+    found: set[str] = set()
+    try:
+        with open(fib_trie, encoding="ascii") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return found
+    for prev, line in zip(lines, lines[1:]):
+        if "/32 host LOCAL" not in line:
+            continue
+        ip = prev.strip().lstrip("|-+` ").strip()
+        try:
+            addr = ipaddress.IPv4Address(ip)
+        except ValueError:
+            continue
+        if not addr.is_loopback:
+            found.add(ip)
+    return found
 
 
 async def _maybe_notify(db: Session, scan: Scan, event: str) -> None:

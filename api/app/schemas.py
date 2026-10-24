@@ -6,6 +6,20 @@ from datetime import datetime
 import ipaddress
 
 
+# SNMPv3 protocol names the scanner understands ("" or None = not used).
+SNMP_V3_AUTH_PROTOCOLS = ("md5", "sha", "sha224", "sha256")
+SNMP_V3_PRIV_PROTOCOLS = ("des", "3des", "aes", "aes128", "aes192", "aes256")
+
+
+def _check_v3_protocol(v: Optional[str], allowed: tuple[str, ...], field: str) -> Optional[str]:
+    if v is None or v == "":
+        return v
+    v = v.lower()
+    if v not in allowed:
+        raise ValueError(f"{field} must be one of: {', '.join(allowed)}")
+    return v
+
+
 class ScanRequest(BaseModel):
     target_ip: str
     subnets: list[str] = []
@@ -13,9 +27,25 @@ class ScanRequest(BaseModel):
     # None = use the default saved in Settings (falls back to 2c / 161).
     snmp_version: Optional[str] = None
     snmp_port: Optional[int] = Field(default=None, ge=1, le=65535)
+    # SNMPv3 USM credentials; unset fields come from Settings.
+    snmp_v3_user: Optional[str] = Field(default=None, max_length=100)
+    snmp_v3_auth_protocol: Optional[str] = None
+    snmp_v3_auth_password: Optional[str] = Field(default=None, max_length=200)
+    snmp_v3_priv_protocol: Optional[str] = None
+    snmp_v3_priv_password: Optional[str] = Field(default=None, max_length=200)
     scan_nmap: bool = True
     scan_arp: bool = True
     scan_snmp: bool = True
+
+    @field_validator("snmp_v3_auth_protocol")
+    @classmethod
+    def validate_v3_auth(cls, v: Optional[str]) -> Optional[str]:
+        return _check_v3_protocol(v, SNMP_V3_AUTH_PROTOCOLS, "snmp_v3_auth_protocol")
+
+    @field_validator("snmp_v3_priv_protocol")
+    @classmethod
+    def validate_v3_priv(cls, v: Optional[str]) -> Optional[str]:
+        return _check_v3_protocol(v, SNMP_V3_PRIV_PROTOCOLS, "snmp_v3_priv_protocol")
 
     @field_validator("target_ip")
     @classmethod
@@ -97,7 +127,10 @@ class DeviceResponse(BaseModel):
     os_version: Optional[str] = None
     sys_name: Optional[str] = None
     sys_descr: Optional[str] = None
+    sys_object_id: Optional[str] = None
     sys_location: Optional[str] = None
+    sys_contact: Optional[str] = None
+    uptime_seconds: Optional[int] = None
     snmp_reachable: bool = False
     position_x: Optional[float] = None
     position_y: Optional[float] = None
@@ -129,6 +162,8 @@ class NetworkResponse(BaseModel):
     vlan_name: Optional[str] = None
     gateway_ip: Optional[str] = None
     device_count: int = 0
+    position_x: Optional[float] = None
+    position_y: Optional[float] = None
 
     class Config:
         from_attributes = True
@@ -152,6 +187,12 @@ class SettingsResponse(BaseModel):
     snmp_port: int = 161
     snmp_timeout: int = 5
     snmp_retries: int = 2
+    # SNMPv3: the passwords are write-only; the API only says whether one is saved.
+    snmp_v3_user: str = ""
+    snmp_v3_auth_protocol: str = ""
+    snmp_v3_auth_password_set: bool = False
+    snmp_v3_priv_protocol: str = ""
+    snmp_v3_priv_password_set: bool = False
     default_scan_nmap: bool = True
     default_scan_arp: bool = True
     default_scan_snmp: bool = True
@@ -174,8 +215,14 @@ class SettingsUpdate(BaseModel):
     snmp_community: Optional[str] = None
     snmp_version: Optional[str] = None
     snmp_port: Optional[int] = Field(default=None, ge=1, le=65535)
-    snmp_timeout: Optional[int] = None
-    snmp_retries: Optional[int] = None
+    snmp_timeout: Optional[int] = Field(default=None, ge=1, le=30)
+    snmp_retries: Optional[int] = Field(default=None, ge=0, le=10)
+    # SNMPv3: a password left out keeps the saved one, "" clears it.
+    snmp_v3_user: Optional[str] = Field(default=None, max_length=100)
+    snmp_v3_auth_protocol: Optional[str] = None
+    snmp_v3_auth_password: Optional[str] = Field(default=None, max_length=200)
+    snmp_v3_priv_protocol: Optional[str] = None
+    snmp_v3_priv_password: Optional[str] = Field(default=None, max_length=200)
     default_scan_nmap: Optional[bool] = None
     default_scan_arp: Optional[bool] = None
     default_scan_snmp: Optional[bool] = None
@@ -196,6 +243,16 @@ class SettingsUpdate(BaseModel):
         if v is not None and v not in ("1", "2c", "3"):
             raise ValueError("snmp_version must be 1, 2c, or 3")
         return v
+
+    @field_validator("snmp_v3_auth_protocol")
+    @classmethod
+    def validate_v3_auth(cls, v: Optional[str]) -> Optional[str]:
+        return _check_v3_protocol(v, SNMP_V3_AUTH_PROTOCOLS, "snmp_v3_auth_protocol")
+
+    @field_validator("snmp_v3_priv_protocol")
+    @classmethod
+    def validate_v3_priv(cls, v: Optional[str]) -> Optional[str]:
+        return _check_v3_protocol(v, SNMP_V3_PRIV_PROTOCOLS, "snmp_v3_priv_protocol")
 
     @field_validator("llm_provider")
     @classmethod
@@ -283,5 +340,12 @@ class PositionUpdate(BaseModel):
     y: float
 
 
+class NetworkPositionUpdate(BaseModel):
+    network_id: int
+    x: float
+    y: float
+
+
 class PositionUpdateRequest(BaseModel):
-    positions: list[PositionUpdate]
+    positions: list[PositionUpdate] = []
+    networks: list[NetworkPositionUpdate] = []

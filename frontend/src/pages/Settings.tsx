@@ -5,11 +5,13 @@ import {
   api,
   errorMessage,
   type SettingsData,
+  type SettingsUpdate,
   type LLMTestResult,
 } from "../services/api";
+import SnmpV3Fields, { EMPTY_V3, v3Problem, type SnmpV3Value } from "../components/SnmpV3Fields";
 
 /** One settings section with its own Save button and saved/failed state. */
-function useSection(save: (data: Partial<SettingsData>) => Promise<SettingsData>) {
+function useSection(save: (data: SettingsUpdate) => Promise<SettingsData>) {
   const queryClient = useQueryClient();
   const [saved, setSaved] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -82,6 +84,8 @@ export default function Settings() {
   const [snmpPort, setSnmpPort] = useState(161);
   const [snmpTimeout, setSnmpTimeout] = useState(5);
   const [snmpRetries, setSnmpRetries] = useState(2);
+  const [v3, setV3] = useState<SnmpV3Value>(EMPTY_V3);
+  const [v3Error, setV3Error] = useState<string | null>(null);
   const [scanNmap, setScanNmap] = useState(true);
   const [scanArp, setScanArp] = useState(true);
   const [scanSnmp, setScanSnmp] = useState(true);
@@ -102,6 +106,13 @@ export default function Settings() {
     setSnmpPort(settings.snmp_port);
     setSnmpTimeout(settings.snmp_timeout);
     setSnmpRetries(settings.snmp_retries);
+    // Passwords are write-only: the fields start empty, the placeholder says one is saved.
+    setV3({
+      ...EMPTY_V3,
+      user: settings.snmp_v3_user,
+      authProtocol: settings.snmp_v3_auth_protocol,
+      privProtocol: settings.snmp_v3_priv_protocol,
+    });
     setScanNmap(settings.default_scan_nmap);
     setScanArp(settings.default_scan_arp);
     setScanSnmp(settings.default_scan_snmp);
@@ -180,17 +191,33 @@ export default function Settings() {
           icon={Radio}
           tone="bg-accent-soft text-accent"
           title="SNMP defaults"
-          desc="Used when a scan does not set its own community or version."
+          desc="Used when a scan does not set its own credentials or version. Timeout and retries apply to every SNMP request."
           section={snmp}
-          onSave={() =>
-            snmp.mutation.mutate({
+          onSave={() => {
+            const saved = {
+              auth: !!settings?.snmp_v3_auth_password_set,
+              priv: !!settings?.snmp_v3_priv_password_set,
+            };
+            const problem = snmpVersion === "3" ? v3Problem(v3, saved) : null;
+            setV3Error(problem);
+            if (problem) return;
+            const body: SettingsUpdate = {
               snmp_community: snmpCommunity,
               snmp_version: snmpVersion,
               snmp_port: snmpPort,
               snmp_timeout: snmpTimeout,
               snmp_retries: snmpRetries,
-            })
-          }
+              snmp_v3_user: v3.user.trim(),
+              snmp_v3_auth_protocol: v3.authProtocol,
+              snmp_v3_priv_protocol: v3.privProtocol,
+            };
+            // No protocol = clear the stored password; blank = keep it.
+            if (!v3.authProtocol) body.snmp_v3_auth_password = "";
+            else if (v3.authPassword) body.snmp_v3_auth_password = v3.authPassword;
+            if (!v3.privProtocol) body.snmp_v3_priv_password = "";
+            else if (v3.privPassword) body.snmp_v3_priv_password = v3.privPassword;
+            snmp.mutation.mutate(body);
+          }}
         >
           <div className="grid gap-3">
             <div>
@@ -219,6 +246,24 @@ export default function Settings() {
                 <input id="s-retries" type="number" className="input" value={snmpRetries} min={0} max={10} onChange={(e) => setSnmpRetries(Number.isNaN(parseInt(e.target.value)) ? 2 : parseInt(e.target.value))} />
               </div>
             </div>
+            {snmpVersion === "3" && (
+              <SnmpV3Fields
+                id="s-v3"
+                value={v3}
+                onChange={(next) => {
+                  setV3(next);
+                  setV3Error(null);
+                }}
+                savedAuth={!!settings?.snmp_v3_auth_password_set && !!v3.authProtocol}
+                savedPriv={!!settings?.snmp_v3_priv_password_set && !!v3.privProtocol}
+              />
+            )}
+            {v3Error && (
+              <div className="alert alert-error" role="alert">
+                <AlertCircle className="w-4 h-4 shrink-0" aria-hidden />
+                {v3Error}
+              </div>
+            )}
           </div>
         </Card>
 

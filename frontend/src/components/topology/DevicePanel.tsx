@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import type { DeviceData, LinkData } from "../../services/api";
-import { deviceType, displayName, formatSpeed } from "../../lib/devices";
+import { deviceType, displayName, formatSpeed, formatUptime } from "../../lib/devices";
 import { CodeBlock, type CodeLine } from "../CodeBlock";
 
 interface DevicePanelProps {
@@ -28,10 +28,13 @@ function Fact({ label, value, mono }: { label: string; value: string | null; mon
 /** The SNMP data the scan stored, as walk-style lines. */
 function snmpLines(device: DeviceData): CodeLine[] {
   const lines: CodeLine[] = [];
-  if (device.sys_name || device.sys_descr || device.sys_location) {
-    lines.push({ k: `system (${device.ip_address}:161)`, comment: true });
+  if (device.snmp_reachable) {
+    lines.push({ k: `system (${device.ip_address})`, comment: true });
     if (device.sys_name) lines.push({ k: "sysName.0", v: device.sys_name });
     if (device.sys_descr) lines.push({ k: "sysDescr.0", v: device.sys_descr });
+    if (device.sys_object_id) lines.push({ k: "sysObjectID.0", v: device.sys_object_id });
+    if (device.uptime_seconds) lines.push({ k: "sysUpTime.0", v: formatUptime(device.uptime_seconds) });
+    if (device.sys_contact) lines.push({ k: "sysContact.0", v: device.sys_contact });
     if (device.sys_location) lines.push({ k: "sysLocation.0", v: device.sys_location });
   }
   const ifaces = [...device.interfaces].sort((a, b) => (a.if_index ?? 0) - (b.if_index ?? 0));
@@ -104,6 +107,9 @@ export default function DevicePanel({ device, devices, links, onSelect, onClose 
           <Fact label="OS" value={os} />
           <Fact label="Hostname" value={device.hostname} mono />
           {device.sys_location && <Fact label="Location" value={device.sys_location} />}
+          {device.sys_contact && <Fact label="Contact" value={device.sys_contact} />}
+          {device.snmp_reachable && <Fact label="Uptime" value={formatUptime(device.uptime_seconds)} />}
+          {device.sys_object_id && <Fact label="Object ID" value={device.sys_object_id} mono />}
           <Fact label="Interfaces" value={String(device.interfaces.length)} />
           <Fact label="Links" value={String(neighbours.length)} />
         </div>

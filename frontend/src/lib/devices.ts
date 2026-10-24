@@ -61,6 +61,17 @@ export function displayName(d: {
   return d.sys_name || d.hostname?.split(".")[0] || d.ip_address;
 }
 
+/** SNMP sysUpTime in seconds as "12d 3h", "3h 4m" or "4m". */
+export function formatUptime(seconds: number | null | undefined): string | null {
+  if (seconds == null || seconds <= 0) return null;
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
 export function formatSpeed(mbps: number | null | undefined): string {
   if (!mbps) return "-";
   return mbps >= 1000 ? `${mbps / 1000} Gb/s` : `${mbps} Mb/s`;

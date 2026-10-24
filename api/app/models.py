@@ -145,6 +145,12 @@ class AppSettings(Base):
     snmp_port = Column(Integer, default=161)
     snmp_timeout = Column(Integer, default=5)
     snmp_retries = Column(Integer, default=2)
+    # SNMPv3 (USM). Passwords are encrypted at rest like the community.
+    snmp_v3_user = Column(String(100))
+    snmp_v3_auth_protocol = Column(String(10))
+    snmp_v3_auth_password = Column(String(512))
+    snmp_v3_priv_protocol = Column(String(10))
+    snmp_v3_priv_password = Column(String(512))
     default_scan_nmap = Column(Boolean, default=True)
     default_scan_arp = Column(Boolean, default=True)
     default_scan_snmp = Column(Boolean, default=True)
@@ -161,28 +167,40 @@ class AppSettings(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
-def ensure_app_settings_columns() -> None:
-    """Idempotently add AppSettings columns introduced after initial creation.
-
-    ``Base.metadata.create_all()`` only creates missing tables — it never ALTERs
-    an existing one. Databases provisioned before the LLM/notification settings
-    were added therefore need the new columns backfilled explicitly. Safe to run
-    on every startup: each column is added only if absent.
-    """
+def _add_missing_columns(table: str, additions: list[tuple[str, str]]) -> None:
+    """ALTER TABLE ``table`` ADD COLUMN for each (name, ddl) not there yet."""
     from sqlalchemy import inspect as sa_inspect, text
 
     from app.database import engine
 
     inspector = sa_inspect(engine)
-    if "app_settings" not in inspector.get_table_names():
-        return  # create_all() will build it fresh with every column
+    if table not in inspector.get_table_names():
+        return  # create_all() builds it fresh with every column
 
-    existing = {col["name"] for col in inspector.get_columns("app_settings")}
+    existing = {col["name"] for col in inspector.get_columns(table)}
+    missing = [(name, ddl) for name, ddl in additions if name not in existing]
+    if not missing:
+        return
+    with engine.begin() as conn:
+        for name, ddl in missing:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+
+
+def ensure_app_settings_columns() -> None:
+    """Idempotently add columns introduced after a table was first created.
+
+    ``Base.metadata.create_all()`` only creates missing tables — it never ALTERs
+    an existing one. Databases provisioned before the LLM/notification/SNMPv3
+    settings or the subnet positions were added need the new columns backfilled
+    explicitly. Safe to run on every startup: each column is added only if absent.
+    """
+    from app.database import engine
+
     is_sqlite = engine.dialect.name == "sqlite"
     false_lit = "0" if is_sqlite else "FALSE"
     true_lit = "1" if is_sqlite else "TRUE"
 
-    additions: list[tuple[str, str]] = [
+    _add_missing_columns("app_settings", [
         ("llm_provider", "VARCHAR(20) DEFAULT 'ollama'"),
         ("llm_ollama_host", "VARCHAR(255) DEFAULT 'http://host.docker.internal:11434'"),
         ("llm_ollama_model", "VARCHAR(100) DEFAULT 'qwen2.5:7b'"),
@@ -191,14 +209,16 @@ def ensure_app_settings_columns() -> None:
         ("notify_webhook_url", "VARCHAR(500)"),
         ("notify_on_scan_complete", f"BOOLEAN DEFAULT {true_lit}"),
         ("notify_on_scan_failed", f"BOOLEAN DEFAULT {true_lit}"),
-    ]
-
-    missing = [(name, ddl) for name, ddl in additions if name not in existing]
-    if not missing:
-        return
-    with engine.begin() as conn:
-        for name, ddl in missing:
-            conn.execute(text(f"ALTER TABLE app_settings ADD COLUMN {name} {ddl}"))
+        ("snmp_v3_user", "VARCHAR(100)"),
+        ("snmp_v3_auth_protocol", "VARCHAR(10)"),
+        ("snmp_v3_auth_password", "VARCHAR(512)"),
+        ("snmp_v3_priv_protocol", "VARCHAR(10)"),
+        ("snmp_v3_priv_password", "VARCHAR(512)"),
+    ])
+    _add_missing_columns("networks", [
+        ("position_x", "FLOAT"),
+        ("position_y", "FLOAT"),
+    ])
 
 
 class Network(Base):
@@ -213,6 +233,9 @@ class Network(Base):
     gateway_ip = Column(String(45))
     gateway_device_id = Column(Integer, ForeignKey("devices.id", ondelete="SET NULL"))
     device_count = Column(Integer, default=0)
+    # Where the user dragged the subnet node; NULL = place it from its members.
+    position_x = Column(Float)
+    position_y = Column(Float)
     created_at = Column(DateTime, server_default=func.now())
 
     scan = relationship("Scan", back_populates="networks")

@@ -8,6 +8,7 @@ import {
   type ScanResponse,
   type SettingsData,
 } from "../services/api";
+import SnmpV3Fields, { EMPTY_V3, v3Problem, type SnmpV3Value } from "../components/SnmpV3Fields";
 
 const METHODS = [
   { key: "snmp", label: "SNMP", desc: "System info, interfaces, CDP/LLDP neighbours, routes, VLANs" },
@@ -86,6 +87,7 @@ export default function ScanPage() {
   const [subnets, setSubnets] = useState([""]);
   const [snmpCommunity, setSnmpCommunity] = useState("");
   const [snmpVersion, setSnmpVersion] = useState("2c");
+  const [v3, setV3] = useState<SnmpV3Value>(EMPTY_V3);
   const [methods, setMethods] = useState<Record<MethodKey, boolean>>({
     snmp: true,
     nmap: true,
@@ -102,6 +104,12 @@ export default function ScanPage() {
     if (settings && !prefilled) {
       setSnmpCommunity(settings.snmp_community);
       setSnmpVersion(settings.snmp_version);
+      setV3({
+        ...EMPTY_V3,
+        user: settings.snmp_v3_user,
+        authProtocol: settings.snmp_v3_auth_protocol,
+        privProtocol: settings.snmp_v3_priv_protocol,
+      });
       setMethods({
         snmp: settings.default_scan_snmp,
         nmap: settings.default_scan_nmap,
@@ -138,14 +146,28 @@ export default function ScanPage() {
     },
   });
 
+  const isV3 = snmpVersion === "3";
+  const savedV3 = {
+    auth: !!settings?.snmp_v3_auth_password_set,
+    priv: !!settings?.snmp_v3_priv_password_set,
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     startScan.mutate({
       target_ip: targetIp.trim(),
       subnets: subnets.map((s) => s.trim()).filter(Boolean),
       // Blank = let the API use the community saved in Settings.
-      snmp_community: snmpCommunity || undefined,
+      snmp_community: isV3 ? undefined : snmpCommunity || undefined,
       snmp_version: snmpVersion,
+      ...(isV3 && {
+        snmp_v3_user: v3.user.trim(),
+        snmp_v3_auth_protocol: v3.authProtocol,
+        snmp_v3_priv_protocol: v3.privProtocol,
+        // A blank password = the one saved in Settings; no protocol = none.
+        snmp_v3_auth_password: v3.authProtocol ? v3.authPassword || undefined : "",
+        snmp_v3_priv_password: v3.privProtocol ? v3.privPassword || undefined : "",
+      }),
       scan_nmap: methods.nmap,
       scan_arp: methods.arp,
       scan_snmp: methods.snmp,
@@ -153,6 +175,7 @@ export default function ScanPage() {
   };
 
   const noMethod = !methods.snmp && !methods.nmap && !methods.arp;
+  const v3Error = methods.snmp && isV3 ? v3Problem(v3, savedV3) : null;
   const needsSubnet =
     (methods.nmap || methods.arp) && subnets.every((s) => !s.trim());
 
@@ -229,17 +252,19 @@ export default function ScanPage() {
 
           <section className="card p-[18px] grid gap-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="label" htmlFor="community">SNMP community</label>
-                <input
-                  id="community"
-                  className="input font-mono"
-                  value={snmpCommunity}
-                  onChange={(e) => setSnmpCommunity(e.target.value)}
-                  placeholder="from Settings"
-                  autoComplete="off"
-                />
-              </div>
+              {!isV3 && (
+                <div>
+                  <label className="label" htmlFor="community">SNMP community</label>
+                  <input
+                    id="community"
+                    className="input font-mono"
+                    value={snmpCommunity}
+                    onChange={(e) => setSnmpCommunity(e.target.value)}
+                    placeholder="from Settings"
+                    autoComplete="off"
+                  />
+                </div>
+              )}
               <div>
                 <label className="label" htmlFor="version">SNMP version</label>
                 <select
@@ -254,6 +279,17 @@ export default function ScanPage() {
                 </select>
               </div>
             </div>
+
+            {isV3 && (
+              <SnmpV3Fields
+                id="v3"
+                value={v3}
+                onChange={setV3}
+                savedAuth={savedV3.auth && !!v3.authProtocol}
+                savedPriv={savedV3.priv && !!v3.privProtocol}
+                savedLabel="from Settings"
+              />
+            )}
 
             <fieldset>
               <legend className="label">Scan methods</legend>
@@ -282,6 +318,7 @@ export default function ScanPage() {
               {errorMessage(startScan.error, "Could not start the scan")}
             </div>
           )}
+          {v3Error && <p className="text-[13px] text-amber-ink">{v3Error}</p>}
           {needsSubnet && (
             <p className="text-[13px] text-amber-ink">nmap and ARP need at least one subnet.</p>
           )}
@@ -289,7 +326,7 @@ export default function ScanPage() {
           <div>
             <button
               type="submit"
-              disabled={!targetIp.trim() || noMethod || startScan.isPending}
+              disabled={!targetIp.trim() || noMethod || !!v3Error || startScan.isPending}
               className="btn btn-primary"
             >
               {startScan.isPending ? (

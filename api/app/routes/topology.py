@@ -59,10 +59,19 @@ async def update_positions(
     request: PositionUpdateRequest,
     db: Session = Depends(get_db),
 ):
-    """Update device positions on the topology canvas."""
+    """Update device and subnet node positions on the topology canvas."""
     scan = db.query(Scan).filter(Scan.id == scan_id).first()
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
+
+    for pos in request.networks:
+        network = db.query(Network).filter(
+            Network.id == pos.network_id,
+            Network.scan_id == scan_id,
+        ).first()
+        if network:
+            network.position_x = pos.x
+            network.position_y = pos.y
 
     for pos in request.positions:
         device = db.query(Device).filter(
@@ -74,4 +83,4 @@ async def update_positions(
             device.position_y = pos.y
 
     db.commit()
-    return {"updated": len(request.positions)}
+    return {"updated": len(request.positions) + len(request.networks)}

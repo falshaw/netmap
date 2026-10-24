@@ -52,6 +52,12 @@ export interface ScanRequest {
   subnets: string[];
   snmp_community?: string;
   snmp_version: string;
+  /** SNMPv3; fields left out come from Settings. */
+  snmp_v3_user?: string;
+  snmp_v3_auth_protocol?: string;
+  snmp_v3_auth_password?: string;
+  snmp_v3_priv_protocol?: string;
+  snmp_v3_priv_password?: string;
   scan_nmap: boolean;
   scan_arp: boolean;
   scan_snmp: boolean;
@@ -100,7 +106,10 @@ export interface DeviceData {
   os_version: string | null;
   sys_name: string | null;
   sys_descr: string | null;
+  sys_object_id: string | null;
   sys_location: string | null;
+  sys_contact: string | null;
+  uptime_seconds: number | null;
   snmp_reachable: boolean;
   position_x: number | null;
   position_y: number | null;
@@ -126,6 +135,9 @@ export interface NetworkData {
   vlan_name: string | null;
   gateway_ip: string | null;
   device_count: number;
+  /** Saved when the subnet node was dragged; null = placed from its members. */
+  position_x: number | null;
+  position_y: number | null;
 }
 
 export interface TopologyData {
@@ -147,6 +159,12 @@ export interface SettingsData {
   snmp_port: number;
   snmp_timeout: number;
   snmp_retries: number;
+  // SNMPv3: the API never returns the passwords, only whether one is saved.
+  snmp_v3_user: string;
+  snmp_v3_auth_protocol: string;
+  snmp_v3_auth_password_set: boolean;
+  snmp_v3_priv_protocol: string;
+  snmp_v3_priv_password_set: boolean;
   default_scan_nmap: boolean;
   default_scan_arp: boolean;
   default_scan_snmp: boolean;
@@ -161,6 +179,14 @@ export interface SettingsData {
   notify_on_scan_complete: boolean;
   notify_on_scan_failed: boolean;
 }
+
+/** PUT /settings body. A password left out keeps the saved one, "" clears it. */
+export type SettingsUpdate = Partial<
+  Omit<SettingsData, "snmp_v3_auth_password_set" | "snmp_v3_priv_password_set">
+> & {
+  snmp_v3_auth_password?: string;
+  snmp_v3_priv_password?: string;
+};
 
 export interface LLMTestRequest {
   llm_provider?: string;
@@ -237,11 +263,17 @@ export const api = {
     return res.data;
   },
 
+  getScanDevices: async (scanId: number): Promise<DeviceData[]> => {
+    const res = await client.get(`/scans/${scanId}/devices`);
+    return res.data;
+  },
+
   updatePositions: async (
     scanId: number,
     positions: { device_id: number; x: number; y: number }[],
+    networks: { network_id: number; x: number; y: number }[] = [],
   ): Promise<void> => {
-    await client.put(`/scans/${scanId}/positions`, { positions });
+    await client.put(`/scans/${scanId}/positions`, { positions, networks });
   },
 
   exportDrawio: async (scanId: number): Promise<void> => {
@@ -262,7 +294,7 @@ export const api = {
   },
 
   updateSettings: async (
-    data: Partial<SettingsData>,
+    data: SettingsUpdate,
   ): Promise<SettingsData> => {
     const res = await client.put("/settings", data);
     return res.data;

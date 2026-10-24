@@ -2,7 +2,8 @@
 
 import logging
 import time
-from typing import Optional
+from dataclasses import dataclass
+from typing import Any, Optional
 
 from pysnmp.hlapi.v3arch.asyncio import (
     CommunityData,
@@ -12,7 +13,8 @@ from pysnmp.hlapi.v3arch.asyncio import (
     ObjectType,
     ObjectIdentity,
     get_cmd,
-    bulk_cmd,
+    bulk_walk_cmd,
+    walk_cmd,
     SnmpEngine,
 )
 
@@ -99,6 +101,19 @@ ROUTE_PROTO_MAP = {
 }
 
 
+DEFAULT_TIMEOUT = 5
+DEFAULT_RETRIES = 2
+
+
+@dataclass(frozen=True)
+class SnmpAuth:
+    """Credentials plus the transport timing every GET/walk uses."""
+
+    data: Any  # CommunityData or UsmUserData
+    timeout: int = DEFAULT_TIMEOUT
+    retries: int = DEFAULT_RETRIES
+
+
 def _get_auth_data(
     community: Optional[str] = None,
     version: str = "2c",
@@ -107,8 +122,33 @@ def _get_auth_data(
     v3_auth_password: Optional[str] = None,
     v3_priv_protocol: Optional[str] = None,
     v3_priv_password: Optional[str] = None,
+    timeout: Optional[int] = None,
+    retries: Optional[int] = None,
+) -> SnmpAuth:
+    """Build SNMP auth data for v1/v2c or v3, with the timeout and retries."""
+    timeout = DEFAULT_TIMEOUT if timeout is None else max(1, min(int(timeout), 30))
+    retries = DEFAULT_RETRIES if retries is None else max(0, min(int(retries), 10))
+    return SnmpAuth(
+        _build_auth_data(
+            community, version, v3_user,
+            v3_auth_protocol, v3_auth_password,
+            v3_priv_protocol, v3_priv_password,
+        ),
+        timeout,
+        retries,
+    )
+
+
+def _build_auth_data(
+    community: Optional[str],
+    version: str,
+    v3_user: Optional[str],
+    v3_auth_protocol: Optional[str],
+    v3_auth_password: Optional[str],
+    v3_priv_protocol: Optional[str],
+    v3_priv_password: Optional[str],
 ):
-    """Build SNMP auth data for v2c or v3."""
+    """The pysnmp credential object for v1/v2c (community) or v3 (USM user)."""
     if version == "3" and v3_user:
         # Validate that v3 auth/priv passwords are non-empty when protocols are specified
         if v3_auth_protocol and not v3_auth_password:
@@ -180,15 +220,15 @@ def _to_mac_bytes(val) -> bytes:
     return b""
 
 
-async def _snmp_get(target: str, port: int, auth_data, oids: list[str]) -> dict[str, str]:
+async def _snmp_get(target: str, port: int, auth: SnmpAuth, oids: list[str]) -> dict[str, str]:
     """SNMP GET for specific OIDs."""
     result = {}
     engine = SnmpEngine()
     try:
         error_indication, error_status, error_index, var_binds = await get_cmd(
             engine,
-            auth_data,
-            await UdpTransportTarget.create((target, port), timeout=5, retries=2),
+            auth.data,
+            await UdpTransportTarget.create((target, port), timeout=auth.timeout, retries=auth.retries),
             ContextData(),
             *[ObjectType(ObjectIdentity(oid)) for oid in oids],
         )
@@ -207,26 +247,34 @@ async def _snmp_get(target: str, port: int, auth_data, oids: list[str]) -> dict[
     return result
 
 
-async def _snmp_walk(target: str, port: int, auth_data, base_oid: str) -> list[tuple[str, str]]:
-    """SNMP BULK WALK for a subtree."""
+def _walk_requests(engine, auth: SnmpAuth, transport, base_oid: str):
+    """Async iterator over the subtree: GETBULK for v2c/v3, GETNEXT for v1.
+
+    SNMPv1 has no GETBULK PDU, so a bulk walk against a v1-only agent fails.
+    """
+    var_bind = ObjectType(ObjectIdentity(base_oid))
+    if isinstance(auth.data, CommunityData) and auth.data.message_processing_model == 0:
+        return walk_cmd(engine, auth.data, transport, ContextData(), var_bind, lexicographicMode=False)
+    return bulk_walk_cmd(
+        engine, auth.data, transport, ContextData(), 0, 25, var_bind, lexicographicMode=False,
+    )
+
+
+async def _snmp_walk(target: str, port: int, auth: SnmpAuth, base_oid: str) -> list[tuple[str, str]]:
+    """SNMP walk of a subtree."""
     results = []
     engine = SnmpEngine()
     try:
-        transport = await UdpTransportTarget.create((target, port), timeout=5, retries=2)
-        async for error_indication, error_status, error_index, var_binds in bulk_cmd(
-            engine,
-            auth_data,
-            transport,
-            ContextData(),
-            0, 25,
-            ObjectType(ObjectIdentity(base_oid)),
-            lexicographicMode=False,
+        transport = await UdpTransportTarget.create((target, port), timeout=auth.timeout, retries=auth.retries)
+        async for error_indication, error_status, error_index, var_binds in _walk_requests(
+            engine, auth, transport, base_oid,
         ):
             if error_indication or error_status:
                 break
             for var_bind in var_binds:
                 oid_str = str(var_bind[0])
-                if not oid_str.startswith(base_oid):
+                # "1.3...2.2.1.1" is a string prefix of "...2.2.1.10": compare on the dot.
+                if not oid_str.startswith(base_oid + "."):
                     return results
                 val = var_bind[1]
                 if hasattr(val, "prettyPrint"):

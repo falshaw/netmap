@@ -156,8 +156,9 @@ class AppSettings(Base):
     default_scan_snmp = Column(Boolean, default=True)
     # LLM / API configuration (used by app.llm — provider + endpoints)
     llm_provider = Column(String(20), default="ollama")
-    llm_ollama_host = Column(String(255), default="http://host.docker.internal:11434")
-    llm_ollama_model = Column(String(100), default="qwen2.5:7b")
+    # Blank = OLLAMA_HOST / OLLAMA_MODEL from the environment (.env)
+    llm_ollama_host = Column(String(255))
+    llm_ollama_model = Column(String(100))
     llm_claude_model = Column(String(20), default="sonnet")
     # Notification preferences
     notify_enabled = Column(Boolean, default=False)
@@ -202,8 +203,8 @@ def ensure_app_settings_columns() -> None:
 
     _add_missing_columns("app_settings", [
         ("llm_provider", "VARCHAR(20) DEFAULT 'ollama'"),
-        ("llm_ollama_host", "VARCHAR(255) DEFAULT 'http://host.docker.internal:11434'"),
-        ("llm_ollama_model", "VARCHAR(100) DEFAULT 'qwen2.5:7b'"),
+        ("llm_ollama_host", "VARCHAR(255)"),
+        ("llm_ollama_model", "VARCHAR(100)"),
         ("llm_claude_model", "VARCHAR(20) DEFAULT 'sonnet'"),
         ("notify_enabled", f"BOOLEAN DEFAULT {false_lit}"),
         ("notify_webhook_url", "VARCHAR(500)"),
@@ -215,6 +216,26 @@ def ensure_app_settings_columns() -> None:
         ("snmp_v3_priv_protocol", "VARCHAR(10)"),
         ("snmp_v3_priv_password", "VARCHAR(512)"),
     ])
+    _clear_old_llm_defaults()
+
+
+def _clear_old_llm_defaults() -> None:
+    """Older versions stored the built-in Ollama host/model in every settings row,
+    which hid OLLAMA_HOST / OLLAMA_MODEL from .env. Blank them so .env applies."""
+    from sqlalchemy import inspect as sa_inspect, text
+
+    from app.database import engine
+
+    if "app_settings" not in sa_inspect(engine).get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(text(
+            "UPDATE app_settings SET llm_ollama_model = NULL WHERE llm_ollama_model = 'qwen2.5:7b'"
+        ))
+        conn.execute(text(
+            "UPDATE app_settings SET llm_ollama_host = NULL "
+            "WHERE llm_ollama_host = 'http://host.docker.internal:11434'"
+        ))
     _add_missing_columns("networks", [
         ("position_x", "FLOAT"),
         ("position_y", "FLOAT"),

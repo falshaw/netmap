@@ -334,12 +334,12 @@ export default function Settings() {
               <>
                 <div>
                   <label className="label" htmlFor="l-host">Ollama host</label>
-                  <input id="l-host" className="input font-mono" value={llmOllamaHost} onChange={(e) => setLlmOllamaHost(e.target.value)} placeholder="http://host.docker.internal:11434" autoComplete="off" />
+                  <input id="l-host" className="input font-mono" value={llmOllamaHost} onChange={(e) => setLlmOllamaHost(e.target.value)} placeholder="blank = OLLAMA_HOST from .env" autoComplete="off" />
                   <p className="hint">Blank = OLLAMA_HOST from .env.</p>
                 </div>
                 <div>
                   <label className="label" htmlFor="l-model">Ollama model</label>
-                  <input id="l-model" className="input font-mono" value={llmOllamaModel} onChange={(e) => setLlmOllamaModel(e.target.value)} placeholder="qwen2.5:7b" autoComplete="off" />
+                  <input id="l-model" className="input font-mono" value={llmOllamaModel} onChange={(e) => setLlmOllamaModel(e.target.value)} placeholder="blank = OLLAMA_MODEL from .env" autoComplete="off" />
                   <p className="hint">Must already be pulled on that host. Blank = OLLAMA_MODEL from .env.</p>
                 </div>
               </>

@@ -84,7 +84,7 @@ docker network inspect netmap_netmap --format "{{range .IPAM.Config}}{{.Subnet}}
 # with -p <name> the network is called <name>_netmap
 ```
 
-Docker usually hands out a /16 (65,534 addresses), which takes a long time to sweep. Containers get the lowest addresses, so scan just the first /28 of it: for `172.20.0.0/16` that is `172.20.0.0/28`.
+Docker hands out a /16 or a /20 (thousands of addresses), which takes a long time to sweep. Containers get the lowest addresses, so scan just the first /28 of it: for `172.20.0.0/16` that is `172.20.0.0/28`, for `192.168.16.0/20` it is `192.168.16.0/28`.
 
 Then on the **Scan** page enter the gateway as the target IP and the /28 under subnets, untick SNMP and ARP, and start the scan. The same through the API:
 
@@ -110,7 +110,7 @@ API_KEY=dev-key ENCRYPTION_KEY=dev-encryption-key uvicorn app.main:app --port 80
 
 On Windows PowerShell set the variables first: `$env:API_KEY="dev-key"; $env:ENCRYPTION_KEY="dev-encryption-key"`, then run `uvicorn app.main:app --port 8021`.
 
-Frontend (Node 20+), in a second terminal. The dev server proxies `/api` to `http://127.0.0.1:8021` and adds the `X-API-Key` header from the `API_KEY` environment variable, like nginx does in Docker:
+Frontend (Node 22.12+), in a second terminal. The dev server proxies `/api` to `http://127.0.0.1:8021` and adds the `X-API-Key` header from the `API_KEY` environment variable, like nginx does in Docker:
 
 ```bash
 cd frontend
@@ -132,7 +132,7 @@ See `.env.example`.
 | `ENCRYPTION_KEY` | yes | Fernet key derivation for stored credentials |
 | `NETMAP_WEB_PORT`, `NETMAP_API_PORT`, `NETMAP_DB_PORT` | no | host ports (default 3021 / 8021 / 5450, all on 127.0.0.1) |
 | `LLM_PROVIDER` | no | `ollama` (default) or `claude` (HTTP bridge) |
-| `OLLAMA_HOST`, `OLLAMA_MODEL` | no | Ollama endpoint and model; the model must already be pulled there |
+| `OLLAMA_HOST`, `OLLAMA_MODEL` | no | Ollama endpoint and model; the model must already be pulled there. Settings can override both; left blank there, these apply |
 | `CLAUDE_BRIDGE_URL`, `CLAUDE_MODEL`, `CLAUDE_BRIDGE_TOKEN` | no | bridge endpoint, model (default `sonnet`) and shared token |
 
 The LLM settings are optional. Scanning, topology, history and export work without any LLM; it is only used by the Settings page "Test connection" probe, which simply reports the provider as unavailable if nothing is configured.

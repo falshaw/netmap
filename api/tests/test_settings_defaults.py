@@ -42,3 +42,31 @@ def test_fresh_settings_row_serialises():
     data = _decrypt_settings(row)
     assert data["snmp_community"] == ""
     SettingsResponse(**data)
+
+
+def test_ollama_host_and_model_default_to_env():
+    """Blank Ollama settings mean OLLAMA_HOST / OLLAMA_MODEL from .env."""
+    for name in ("llm_ollama_host", "llm_ollama_model"):
+        col = AppSettings.__table__.c[name]
+        assert col.default is None or col.default.arg is None
+
+
+def test_llm_test_uses_env_model_for_a_blank_field(monkeypatch):
+    import asyncio
+
+    from app.routes import settings as route
+    from app.schemas import LLMTestRequest
+
+    saved = AppSettings(id=1, llm_provider="ollama", llm_ollama_host="http://saved:11434",
+                        llm_ollama_model="saved-model:1b")
+    monkeypatch.setattr(route, "_get_or_create", lambda db: saved)
+    seen = {}
+    monkeypatch.setattr(route.llm, "probe_provider", lambda provider, **kw: seen.update(kw) or {})
+
+    # blank on screen -> None, so probe_provider falls back to .env
+    asyncio.run(route.test_llm_connection(LLMTestRequest(llm_ollama_model="", llm_ollama_host=""), db=None))
+    assert seen["ollama_model"] is None and seen["ollama_host"] is None
+
+    # left out -> the saved value
+    asyncio.run(route.test_llm_connection(LLMTestRequest(), db=None))
+    assert seen["ollama_model"] == "saved-model:1b"

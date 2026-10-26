@@ -1,6 +1,7 @@
 """Application settings routes"""
 
 import os
+from typing import Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -105,10 +106,16 @@ async def test_llm_connection(
     """
     settings = _get_or_create(db)
     provider = req.llm_provider or settings.llm_provider or "ollama"
+
+    # A field sent blank means "what .env says", as the form describes;
+    # only a field left out falls back to the saved value.
+    def on_screen(sent: Optional[str], saved: Optional[str]) -> Optional[str]:
+        return (sent or None) if sent is not None else saved
+
     result = llm.probe_provider(
         provider,
-        ollama_host=req.llm_ollama_host or settings.llm_ollama_host,
-        ollama_model=req.llm_ollama_model or settings.llm_ollama_model,
+        ollama_host=on_screen(req.llm_ollama_host, settings.llm_ollama_host),
+        ollama_model=on_screen(req.llm_ollama_model, settings.llm_ollama_model),
         claude_model=req.llm_claude_model or settings.llm_claude_model,
         bridge_token=os.getenv("CLAUDE_BRIDGE_TOKEN"),
     )

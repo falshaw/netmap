@@ -198,8 +198,8 @@ class SettingsResponse(BaseModel):
     default_scan_snmp: bool = True
     # LLM / API configuration
     llm_provider: str = "ollama"
-    llm_ollama_host: str = "http://host.docker.internal:11434"
-    llm_ollama_model: str = "qwen2.5:7b"
+    llm_ollama_host: str = ""  # blank = OLLAMA_HOST from .env
+    llm_ollama_model: str = ""  # blank = OLLAMA_MODEL from .env
     llm_claude_model: str = "sonnet"
     # Notification preferences
     notify_enabled: bool = False
